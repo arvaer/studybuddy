@@ -7,7 +7,12 @@ import {
   StickyNote,
   Sparkles,
   PanelRightOpen,
-  PanelRightClose
+  PanelRightClose,
+  BookOpen,
+  Video,
+  Play,
+  Link as LinkIcon,
+  ExternalLink
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -16,6 +21,8 @@ import { StateBadge } from "@/components/ui/state-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { mockQuestions, mockNotes, mockRUs } from "@/lib/mockData";
 
@@ -49,19 +56,98 @@ The cycle consists of three main phases:
 - Regeneration of RuBP
 `;
 
+function extractVideoId(url: string): { type: 'youtube' | 'vimeo' | 'unknown'; id: string | null } {
+  // YouTube patterns
+  const youtubePatterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/watch\?.*v=([a-zA-Z0-9_-]{11})/,
+  ];
+  
+  for (const pattern of youtubePatterns) {
+    const match = url.match(pattern);
+    if (match) return { type: 'youtube', id: match[1] };
+  }
+  
+  // Vimeo pattern
+  const vimeoPattern = /vimeo\.com\/(\d+)/;
+  const vimeoMatch = url.match(vimeoPattern);
+  if (vimeoMatch) return { type: 'vimeo', id: vimeoMatch[1] };
+  
+  return { type: 'unknown', id: null };
+}
+
+function VideoPlayer({ url }: { url: string }) {
+  const { type, id } = extractVideoId(url);
+  
+  if (type === 'youtube' && id) {
+    return (
+      <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-muted">
+        <iframe
+          src={`https://www.youtube.com/embed/${id}?rel=0`}
+          title="Lecture Video"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+          className="absolute inset-0 w-full h-full"
+        />
+      </div>
+    );
+  }
+  
+  if (type === 'vimeo' && id) {
+    return (
+      <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-muted">
+        <iframe
+          src={`https://player.vimeo.com/video/${id}`}
+          title="Lecture Video"
+          allow="autoplay; fullscreen; picture-in-picture"
+          allowFullScreen
+          className="absolute inset-0 w-full h-full"
+        />
+      </div>
+    );
+  }
+  
+  // Fallback for direct video URLs
+  if (url.match(/\.(mp4|webm|ogg)$/i)) {
+    return (
+      <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-muted">
+        <video
+          src={url}
+          controls
+          className="absolute inset-0 w-full h-full"
+        />
+      </div>
+    );
+  }
+  
+  return null;
+}
+
 export default function LearnPage() {
   const [showPrompt, setShowPrompt] = useState(true);
   const [showNotes, setShowNotes] = useState(true);
   const [readProgress, setReadProgress] = useState(35);
+  const [activeTab, setActiveTab] = useState<'reading' | 'video'>('reading');
+  const [videoUrl, setVideoUrl] = useState('');
+  const [loadedVideoUrl, setLoadedVideoUrl] = useState('');
+  const [videoProgress, setVideoProgress] = useState(0);
 
   const currentQuestion = mockQuestions[0];
   const relevantNotes = mockNotes.filter(n => n.conceptId === 'c1');
   const relevantRUs = mockRUs.filter(ru => ru.conceptId === 'c1');
 
+  const handleLoadVideo = () => {
+    if (videoUrl.trim()) {
+      setLoadedVideoUrl(videoUrl);
+    }
+  };
+
+  const progress = activeTab === 'reading' ? readProgress : videoProgress;
+
   return (
     <AppLayout>
       <div className="flex h-full">
-        {/* Main reading area */}
+        {/* Main content area */}
         <div className="flex-1 flex flex-col">
           {/* Top bar */}
           <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-card/50">
@@ -73,21 +159,27 @@ export default function LearnPage() {
               </Link>
               <div>
                 <h1 className="font-display font-semibold text-foreground">
-                  Photosynthesis Deep Dive
+                  {activeTab === 'reading' ? 'Photosynthesis Deep Dive' : 'Video Lecture'}
                 </h1>
-                <p className="text-xs text-muted-foreground">Chapter 8</p>
+                <p className="text-xs text-muted-foreground">
+                  {activeTab === 'reading' ? 'Chapter 8' : 'Watch & Learn'}
+                </p>
               </div>
             </div>
             
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" className="gap-1.5">
-                <Highlighter className="h-4 w-4" />
-                Highlight
-              </Button>
-              <Button variant="ghost" size="sm" className="gap-1.5">
-                <BookmarkPlus className="h-4 w-4" />
-                Bookmark
-              </Button>
+              {activeTab === 'reading' && (
+                <>
+                  <Button variant="ghost" size="sm" className="gap-1.5">
+                    <Highlighter className="h-4 w-4" />
+                    Highlight
+                  </Button>
+                  <Button variant="ghost" size="sm" className="gap-1.5">
+                    <BookmarkPlus className="h-4 w-4" />
+                    Bookmark
+                  </Button>
+                </>
+              )}
               <Button 
                 variant="ghost" 
                 size="sm" 
@@ -100,55 +192,170 @@ export default function LearnPage() {
             </div>
           </header>
 
+          {/* Mode tabs */}
+          <div className="px-6 py-3 border-b border-border/50 bg-muted/30">
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'reading' | 'video')}>
+              <TabsList className="bg-background">
+                <TabsTrigger value="reading" className="gap-2">
+                  <BookOpen className="h-4 w-4" />
+                  Reading
+                </TabsTrigger>
+                <TabsTrigger value="video" className="gap-2">
+                  <Video className="h-4 w-4" />
+                  Video
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+
           {/* Progress */}
           <div className="px-6 py-2 border-b border-border/50">
             <div className="flex items-center gap-3">
-              <Progress value={readProgress} className="h-1.5 flex-1" />
+              <Progress value={progress} className="h-1.5 flex-1" />
               <span className="text-xs font-medium text-muted-foreground">
-                {readProgress}% complete
+                {progress}% complete
               </span>
             </div>
           </div>
 
           {/* Content */}
           <div className="flex-1 overflow-y-auto">
-            <div className="max-w-3xl mx-auto px-8 py-8">
-              <article className="prose prose-slate max-w-none">
-                <div className="whitespace-pre-line font-body text-foreground leading-relaxed">
-                  {sampleContent.split('\n').map((line, i) => {
-                    if (line.startsWith('# ')) {
-                      return <h1 key={i} className="font-display text-3xl font-bold mt-0 mb-6">{line.slice(2)}</h1>;
-                    }
-                    if (line.startsWith('## ')) {
-                      return <h2 key={i} className="font-display text-2xl font-semibold mt-8 mb-4">{line.slice(3)}</h2>;
-                    }
-                    if (line.startsWith('### ')) {
-                      return <h3 key={i} className="font-display text-xl font-medium mt-6 mb-3">{line.slice(4)}</h3>;
-                    }
-                    if (line.startsWith('> ')) {
-                      return (
-                        <blockquote key={i} className="border-l-4 border-accent pl-4 my-4 text-muted-foreground italic">
-                          {line.slice(2)}
-                        </blockquote>
-                      );
-                    }
-                    if (line.startsWith('- ')) {
-                      return <li key={i} className="ml-4 mb-1">{line.slice(2)}</li>;
-                    }
-                    if (line.match(/^\d+\./)) {
-                      return <li key={i} className="ml-4 mb-1 list-decimal">{line.slice(3)}</li>;
-                    }
-                    if (line.trim() === '') return <br key={i} />;
+            {activeTab === 'reading' ? (
+              <div className="max-w-3xl mx-auto px-8 py-8">
+                <article className="prose prose-slate max-w-none">
+                  <div className="whitespace-pre-line font-body text-foreground leading-relaxed">
+                    {sampleContent.split('\n').map((line, i) => {
+                      if (line.startsWith('# ')) {
+                        return <h1 key={i} className="font-display text-3xl font-bold mt-0 mb-6">{line.slice(2)}</h1>;
+                      }
+                      if (line.startsWith('## ')) {
+                        return <h2 key={i} className="font-display text-2xl font-semibold mt-8 mb-4">{line.slice(3)}</h2>;
+                      }
+                      if (line.startsWith('### ')) {
+                        return <h3 key={i} className="font-display text-xl font-medium mt-6 mb-3">{line.slice(4)}</h3>;
+                      }
+                      if (line.startsWith('> ')) {
+                        return (
+                          <blockquote key={i} className="border-l-4 border-accent pl-4 my-4 text-muted-foreground italic">
+                            {line.slice(2)}
+                          </blockquote>
+                        );
+                      }
+                      if (line.startsWith('- ')) {
+                        return <li key={i} className="ml-4 mb-1">{line.slice(2)}</li>;
+                      }
+                      if (line.match(/^\d+\./)) {
+                        return <li key={i} className="ml-4 mb-1 list-decimal">{line.slice(3)}</li>;
+                      }
+                      if (line.trim() === '') return <br key={i} />;
+                      
+                      const highlighted = line
+                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                      
+                      return <p key={i} className="mb-4" dangerouslySetInnerHTML={{ __html: highlighted }} />;
+                    })}
+                  </div>
+                </article>
+              </div>
+            ) : (
+              <div className="max-w-4xl mx-auto px-8 py-8">
+                {/* Video URL input */}
+                {!loadedVideoUrl ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="text-center py-12"
+                  >
+                    <div className="inline-flex items-center justify-center h-16 w-16 rounded-full bg-muted mb-6">
+                      <Video className="h-8 w-8 text-muted-foreground" />
+                    </div>
+                    <h2 className="font-display text-2xl font-semibold text-foreground mb-2">
+                      Add a Lecture Video
+                    </h2>
+                    <p className="text-muted-foreground mb-6 max-w-md mx-auto">
+                      Paste a YouTube, Vimeo, or direct video link to start learning. 
+                      Study Buddy will track your progress and prompt you with questions.
+                    </p>
                     
-                    // Highlight concept keywords
-                    const highlighted = line
-                      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                    <div className="flex gap-2 max-w-lg mx-auto">
+                      <div className="relative flex-1">
+                        <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          type="url"
+                          placeholder="https://youtube.com/watch?v=..."
+                          value={videoUrl}
+                          onChange={(e) => setVideoUrl(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleLoadVideo()}
+                          className="pl-10"
+                        />
+                      </div>
+                      <Button onClick={handleLoadVideo} disabled={!videoUrl.trim()}>
+                        <Play className="h-4 w-4 mr-2" />
+                        Load Video
+                      </Button>
+                    </div>
                     
-                    return <p key={i} className="mb-4" dangerouslySetInnerHTML={{ __html: highlighted }} />;
-                  })}
-                </div>
-              </article>
-            </div>
+                    <div className="mt-8 flex items-center justify-center gap-6 text-sm text-muted-foreground">
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-stable" />
+                        YouTube
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-stable" />
+                        Vimeo
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-stable" />
+                        Direct MP4/WebM
+                      </span>
+                    </div>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="space-y-4"
+                  >
+                    {/* Video player */}
+                    <VideoPlayer url={loadedVideoUrl} />
+                    
+                    {/* Video info */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <ExternalLink className="h-4 w-4" />
+                        <span className="truncate max-w-md">{loadedVideoUrl}</span>
+                      </div>
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => {
+                          setLoadedVideoUrl('');
+                          setVideoUrl('');
+                        }}
+                      >
+                        Change Video
+                      </Button>
+                    </div>
+                    
+                    {/* Video controls hint */}
+                    <Card className="p-4 bg-muted/30 border-muted">
+                      <div className="flex items-start gap-3">
+                        <Sparkles className="h-5 w-5 text-accent mt-0.5" />
+                        <div>
+                          <p className="text-sm font-medium text-foreground">
+                            Smart Learning Mode Active
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            Study Buddy will pause at key moments to check your understanding. 
+                            You can also take notes in the panel on the right.
+                          </p>
+                        </div>
+                      </div>
+                    </Card>
+                  </motion.div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -201,6 +408,24 @@ export default function LearnPage() {
                       </Button>
                     </div>
                   </div>
+
+                  {/* Timestamps (for video mode) */}
+                  {activeTab === 'video' && loadedVideoUrl && (
+                    <div>
+                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                        Timestamps
+                      </span>
+                      <div className="mt-2 space-y-2">
+                        <Card className="p-3 cursor-pointer hover:bg-muted/50 transition-colors">
+                          <div className="flex items-center gap-2 text-xs text-accent mb-1">
+                            <span className="font-mono">00:00</span>
+                            <span>Introduction</span>
+                          </div>
+                          <p className="text-sm text-muted-foreground">Click to add timestamp notes...</p>
+                        </Card>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Related concepts */}
                   <div>
