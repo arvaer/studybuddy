@@ -1,10 +1,28 @@
-import { Concept, ReinforcementUnit, StudySession, Question, Note, LearnerProgress } from '@/types/study';
+import { Concept, ReinforcementUnit, StudySession, Question, Note, LearnerProgress, Topic } from '@/types/study';
+
+export const mockTopics: Topic[] = [
+  {
+    id: 't1',
+    name: 'Biology 101',
+    description: 'Introduction to biological concepts and life processes',
+    color: 'hsl(var(--stable))',
+    createdAt: new Date(Date.now() - 86400000 * 30),
+  },
+  {
+    id: 't2',
+    name: 'Genetics & Evolution',
+    description: 'DNA, heredity, and evolutionary principles',
+    color: 'hsl(var(--accent))',
+    createdAt: new Date(Date.now() - 86400000 * 20),
+  },
+];
 
 export const mockConcepts: Concept[] = [
   {
     id: 'c1',
     name: 'Photosynthesis',
     description: 'The process by which plants convert light energy into chemical energy',
+    topicId: 't1',
     parentId: null,
     reinforcementUnits: [],
   },
@@ -12,6 +30,7 @@ export const mockConcepts: Concept[] = [
     id: 'c2',
     name: 'Cellular Respiration',
     description: 'The process by which cells break down glucose to produce ATP',
+    topicId: 't1',
     parentId: null,
     reinforcementUnits: [],
   },
@@ -19,6 +38,7 @@ export const mockConcepts: Concept[] = [
     id: 'c3',
     name: 'DNA Replication',
     description: 'The biological process of producing two identical DNA molecules',
+    topicId: 't2',
     parentId: null,
     reinforcementUnits: [],
   },
@@ -26,6 +46,7 @@ export const mockConcepts: Concept[] = [
     id: 'c4',
     name: 'Mitosis',
     description: 'Cell division resulting in two identical daughter cells',
+    topicId: 't2',
     parentId: null,
     reinforcementUnits: [],
   },
@@ -33,6 +54,7 @@ export const mockConcepts: Concept[] = [
     id: 'c5',
     name: 'Natural Selection',
     description: 'The differential survival and reproduction of individuals',
+    topicId: null, // Uncategorized
     parentId: null,
     reinforcementUnits: [],
   },
