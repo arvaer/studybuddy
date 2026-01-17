@@ -20,10 +20,19 @@ export interface ReinforcementUnit {
   dependencies: string[]; // IDs of RUs this depends on
 }
 
+export interface Topic {
+  id: string;
+  name: string;
+  description: string;
+  color: string; // For visual distinction
+  createdAt: Date;
+}
+
 export interface Concept {
   id: string;
   name: string;
   description: string;
+  topicId: string | null; // Reference to parent topic
   parentId: string | null;
   reinforcementUnits: ReinforcementUnit[];
 }

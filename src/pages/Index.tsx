@@ -6,14 +6,16 @@ import {
   Clock, 
   Flame,
   TrendingUp,
-  Plus
+  Plus,
+  FileQuestion
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { ConceptCard } from "@/components/concept-card";
+import { TopicCard } from "@/components/topic-card";
 import { SessionCard } from "@/components/session-card";
 import { StatsCard } from "@/components/stats-card";
 import { Button } from "@/components/ui/button";
-import { mockConcepts, mockRUs, mockSessions, mockProgress } from "@/lib/mockData";
+import { mockConcepts, mockRUs, mockSessions, mockProgress, mockTopics } from "@/lib/mockData";
 
 const container = {
   hidden: { opacity: 0 },
@@ -33,6 +35,15 @@ const enrichedConcepts = mockConcepts.map(concept => ({
   ...concept,
   reinforcementUnits: mockRUs.filter(ru => ru.conceptId === concept.id)
 }));
+
+// Group concepts by topic
+const conceptsByTopic = mockTopics.map(topic => ({
+  topic,
+  concepts: enrichedConcepts.filter(c => c.topicId === topic.id)
+}));
+
+// Get uncategorized concepts (no topic assigned)
+const uncategorizedConcepts = enrichedConcepts.filter(c => !c.topicId);
 
 export default function Dashboard() {
   const formatStudyTime = (minutes: number) => {
@@ -108,7 +119,7 @@ export default function Dashboard() {
 
         {/* Two column layout */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Concepts column */}
+          {/* Topics & Concepts column */}
           <motion.section 
             variants={container}
             initial="hidden"
@@ -119,7 +130,7 @@ export default function Dashboard() {
               <div className="flex items-center gap-2">
                 <BookOpen className="h-5 w-5 text-muted-foreground" />
                 <h2 className="font-display text-lg font-semibold text-foreground">
-                  Your Concepts
+                  Your Topics
                 </h2>
               </div>
               <Button variant="outline" size="sm" className="gap-1.5">
@@ -128,16 +139,45 @@ export default function Dashboard() {
               </Button>
             </div>
             
-            <div className="space-y-3">
-              {enrichedConcepts.map((concept) => (
-                <motion.div key={concept.id} variants={item}>
-                  <ConceptCard
-                    name={concept.name}
-                    description={concept.description}
-                    reinforcementUnits={concept.reinforcementUnits}
+            <div className="space-y-4">
+              {/* Topics with their concepts */}
+              {conceptsByTopic.map(({ topic, concepts }) => (
+                <motion.div key={topic.id} variants={item}>
+                  <TopicCard 
+                    topic={topic} 
+                    concepts={concepts}
+                    defaultExpanded={concepts.some(c => 
+                      c.reinforcementUnits.some(ru => 
+                        ru.state === 'unstable' || ru.state === 'introduced'
+                      )
+                    )}
                   />
                 </motion.div>
               ))}
+              
+              {/* Uncategorized concepts */}
+              {uncategorizedConcepts.length > 0 && (
+                <motion.div variants={item}>
+                  <div className="mt-6">
+                    <div className="flex items-center gap-2 mb-3">
+                      <FileQuestion className="h-4 w-4 text-muted-foreground" />
+                      <h3 className="text-sm font-medium text-muted-foreground">
+                        Uncategorized
+                      </h3>
+                    </div>
+                    <div className="space-y-3 pl-1">
+                      {uncategorizedConcepts.map((concept) => (
+                        <ConceptCard
+                          key={concept.id}
+                          name={concept.name}
+                          description={concept.description}
+                          reinforcementUnits={concept.reinforcementUnits}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
             </div>
           </motion.section>
 
