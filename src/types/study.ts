@@ -67,6 +67,18 @@ export interface Note {
   anchorPosition?: number; // For text anchoring
 }
 
+export type ResourceType = 'pdf' | 'video' | 'article' | 'lecture' | 'textbook';
+
+export interface Resource {
+  id: string;
+  title: string;
+  type: ResourceType;
+  url?: string;
+  topicId: string;
+  conceptIds: string[]; // Concepts generated from this resource
+  addedAt: Date;
+}
+
 export interface LearnerProgress {
   totalConcepts: number;
   stableConcepts: number;

@@ -1,4 +1,4 @@
-import { Concept, ReinforcementUnit, StudySession, Question, Note, LearnerProgress, Topic } from '@/types/study';
+import { Concept, ReinforcementUnit, StudySession, Question, Note, LearnerProgress, Topic, Resource } from '@/types/study';
 
 export const mockTopics: Topic[] = [
   {
@@ -132,6 +132,61 @@ export const mockRUs: ReinforcementUnit[] = [
     lastReinforced: new Date(Date.now() - 86400000 * 5),
     createdAt: new Date(Date.now() - 86400000 * 21),
     dependencies: [],
+  },
+];
+
+export const mockResources: Resource[] = [
+  {
+    id: 'r1',
+    title: 'Chapter 8: Photosynthesis (Campbell Biology)',
+    type: 'textbook',
+    topicId: 't1',
+    conceptIds: ['c1'],
+    addedAt: new Date(Date.now() - 86400000 * 14),
+  },
+  {
+    id: 'r2',
+    title: 'Cellular Respiration Lecture',
+    type: 'video',
+    url: 'https://youtube.com/watch?v=example1',
+    topicId: 't1',
+    conceptIds: ['c2'],
+    addedAt: new Date(Date.now() - 86400000 * 10),
+  },
+  {
+    id: 'r3',
+    title: 'MIT OCW: ATP Synthesis',
+    type: 'lecture',
+    url: 'https://ocw.mit.edu/example',
+    topicId: 't1',
+    conceptIds: ['c1', 'c2'],
+    addedAt: new Date(Date.now() - 86400000 * 7),
+  },
+  {
+    id: 'r4',
+    title: 'DNA Replication Animation',
+    type: 'video',
+    url: 'https://youtube.com/watch?v=example2',
+    topicId: 't2',
+    conceptIds: ['c3'],
+    addedAt: new Date(Date.now() - 86400000 * 5),
+  },
+  {
+    id: 'r5',
+    title: 'Cell Cycle PDF Notes',
+    type: 'pdf',
+    topicId: 't2',
+    conceptIds: ['c4'],
+    addedAt: new Date(Date.now() - 86400000 * 3),
+  },
+  {
+    id: 'r6',
+    title: 'Evolution & Natural Selection Article',
+    type: 'article',
+    url: 'https://nature.com/example',
+    topicId: 't2',
+    conceptIds: ['c5'],
+    addedAt: new Date(Date.now() - 86400000 * 2),
   },
 ];
 

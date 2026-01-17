@@ -1,9 +1,9 @@
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, FolderOpen, Folder, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, FolderOpen, Folder, Plus, Trash2, FileText, Video, BookOpen, FileIcon } from "lucide-react";
 import { useState } from "react";
-import { Topic, Concept, ReinforcementUnit } from "@/types/study";
+import { Topic, Concept, ReinforcementUnit, Resource } from "@/types/study";
 import { DraggableConceptCard } from "./draggable-concept-card";
 import { Button } from "./ui/button";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 interface DroppableTopicCardProps {
   topic: Topic;
   concepts: (Concept & { reinforcementUnits: ReinforcementUnit[] })[];
+  resources: Resource[];
   defaultExpanded?: boolean;
   onDeleteConcept?: (conceptId: string) => void;
   onDeleteTopic?: () => void;
@@ -19,6 +20,7 @@ interface DroppableTopicCardProps {
 export function DroppableTopicCard({ 
   topic, 
   concepts, 
+  resources,
   defaultExpanded = false,
   onDeleteConcept,
   onDeleteTopic 
@@ -37,6 +39,10 @@ export function DroppableTopicCard({
     0
   );
   const progressPercent = totalRUs > 0 ? Math.round((stableRUs / totalRUs) * 100) : 0;
+
+  // Count resources by type
+  const videoCount = resources.filter(r => r.type === 'video' || r.type === 'lecture').length;
+  const docCount = resources.filter(r => r.type === 'pdf' || r.type === 'textbook' || r.type === 'article').length;
 
   return (
     <div 
@@ -67,9 +73,16 @@ export function DroppableTopicCard({
             <h3 className="font-display font-semibold text-foreground truncate">
               {topic.name}
             </h3>
-            <p className="text-sm text-muted-foreground truncate">
-              {concepts.length} concept{concepts.length !== 1 ? 's' : ''} · {progressPercent}% mastered
-            </p>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span>{concepts.length} concept{concepts.length !== 1 ? 's' : ''}</span>
+              <span>·</span>
+              <span>{progressPercent}% mastered</span>
+              <span>·</span>
+              <span className="flex items-center gap-1">
+                <FileIcon className="h-3 w-3" />
+                {resources.length} resource{resources.length !== 1 ? 's' : ''}
+              </span>
+            </div>
           </div>
           
           <div className="flex items-center gap-2">
