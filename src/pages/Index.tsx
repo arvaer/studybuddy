@@ -29,8 +29,8 @@ import { SessionCard } from "@/components/session-card";
 import { StatsCard } from "@/components/stats-card";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { mockConcepts, mockRUs, mockSessions, mockProgress, mockTopics } from "@/lib/mockData";
-import { Concept, ReinforcementUnit, Topic } from "@/types/study";
+import { mockConcepts, mockRUs, mockSessions, mockProgress, mockTopics, mockResources } from "@/lib/mockData";
+import { Concept, ReinforcementUnit, Topic, Resource } from "@/types/study";
 import { cn } from "@/lib/utils";
 
 const container = {
@@ -100,6 +100,7 @@ function UncategorizedDropZone({
 export default function Dashboard() {
   const [topics, setTopics] = useState<Topic[]>(mockTopics);
   const [concepts, setConcepts] = useState<Concept[]>(mockConcepts);
+  const [resources] = useState<Resource[]>(mockResources);
   const [activeId, setActiveId] = useState<string | null>(null);
   
   const sensors = useSensors(
@@ -125,13 +126,14 @@ export default function Dashboard() {
     [concepts]
   );
 
-  // Group concepts by topic
+  // Group concepts by topic with resources
   const conceptsByTopic = useMemo(() => 
     topics.map(topic => ({
       topic,
-      concepts: enrichedConcepts.filter(c => c.topicId === topic.id)
+      concepts: enrichedConcepts.filter(c => c.topicId === topic.id),
+      resources: resources.filter(r => r.topicId === topic.id)
     })),
-    [topics, enrichedConcepts]
+    [topics, enrichedConcepts, resources]
   );
 
   // Get uncategorized concepts
@@ -299,11 +301,12 @@ export default function Dashboard() {
             >
               <div className="space-y-4">
                 {/* Topics with their concepts */}
-                {conceptsByTopic.map(({ topic, concepts }) => (
+                {conceptsByTopic.map(({ topic, concepts, resources: topicResources }) => (
                   <motion.div key={topic.id} variants={item}>
                     <DroppableTopicCard 
                       topic={topic} 
                       concepts={concepts}
+                      resources={topicResources}
                       defaultExpanded={concepts.some(c => 
                         c.reinforcementUnits.some(ru => 
                           ru.state === 'unstable' || ru.state === 'introduced'
