@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { 
   DndContext, 
@@ -50,10 +51,12 @@ const item = {
 function UncategorizedDropZone({ 
   concepts, 
   onDeleteConcept,
+  onConceptClick,
   isOver 
 }: { 
   concepts: (Concept & { reinforcementUnits: ReinforcementUnit[] })[];
   onDeleteConcept: (id: string) => void;
+  onConceptClick: (id: string) => void;
   isOver: boolean;
 }) {
   return (
@@ -81,6 +84,7 @@ function UncategorizedDropZone({
               description={concept.description}
               reinforcementUnits={concept.reinforcementUnits}
               onDelete={() => onDeleteConcept(concept.id)}
+              onClick={() => onConceptClick(concept.id)}
             />
           ))}
         </div>
@@ -98,6 +102,7 @@ function UncategorizedDropZone({
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [topics, setTopics] = useState<Topic[]>(mockTopics);
   const [concepts, setConcepts] = useState<Concept[]>(mockConcepts);
   const [resources] = useState<Resource[]>(mockResources);
@@ -323,6 +328,7 @@ export default function Dashboard() {
                   <UncategorizedDropZone 
                     concepts={uncategorizedConcepts}
                     onDeleteConcept={handleDeleteConcept}
+                    onConceptClick={(id) => navigate(`/concept/${id}`)}
                     isOver={isOverUncategorized}
                   />
                 </motion.div>

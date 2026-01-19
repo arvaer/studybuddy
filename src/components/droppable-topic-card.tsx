@@ -3,6 +3,7 @@ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, FolderOpen, Folder, Plus, Trash2, FileText, Video, BookOpen, FileIcon } from "lucide-react";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Topic, Concept, ReinforcementUnit, Resource } from "@/types/study";
 import { DraggableConceptCard } from "./draggable-concept-card";
 import { Button } from "./ui/button";
@@ -15,6 +16,7 @@ interface DroppableTopicCardProps {
   defaultExpanded?: boolean;
   onDeleteConcept?: (conceptId: string) => void;
   onDeleteTopic?: () => void;
+  onConceptClick?: (conceptId: string) => void;
 }
 
 export function DroppableTopicCard({ 
@@ -23,9 +25,11 @@ export function DroppableTopicCard({
   resources,
   defaultExpanded = false,
   onDeleteConcept,
-  onDeleteTopic 
+  onDeleteTopic,
+  onConceptClick 
 }: DroppableTopicCardProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+  const navigate = useNavigate();
   
   const { setNodeRef, isOver } = useDroppable({
     id: `topic-${topic.id}`,
@@ -142,6 +146,7 @@ export function DroppableTopicCard({
                         description={concept.description}
                         reinforcementUnits={concept.reinforcementUnits}
                         onDelete={() => onDeleteConcept?.(concept.id)}
+                        onClick={() => navigate(`/concept/${concept.id}`)}
                       />
                     </div>
                   ))}
