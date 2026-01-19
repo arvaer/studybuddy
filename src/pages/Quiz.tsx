@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   ChevronLeft, 
@@ -8,16 +8,24 @@ import {
   RotateCcw,
   Trophy,
   Target,
-  Zap
+  Zap,
+  Filter
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { ProgressRing } from "@/components/ui/progress-ring";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { mockQuestions } from "@/lib/mockData";
+import { mockQuestions, mockTopics, mockConcepts, mockRUs } from "@/lib/mockData";
 
 type AnswerState = {
   answer: string;
@@ -25,21 +33,76 @@ type AnswerState = {
 } | null;
 
 export default function QuizPage() {
+  const [searchParams] = useSearchParams();
+  const initialTopicId = searchParams.get('topicId') || 'all';
+  const initialConceptId = searchParams.get('conceptId') || 'all';
+
+  const [selectedTopicId, setSelectedTopicId] = useState(initialTopicId);
+  const [selectedConceptId, setSelectedConceptId] = useState(initialConceptId);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [answers, setAnswers] = useState<(AnswerState)[]>(
-    new Array(mockQuestions.length).fill(null)
-  );
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [showFeedback, setShowFeedback] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
 
-  const currentQuestion = mockQuestions[currentIndex];
-  const progress = ((currentIndex + 1) / mockQuestions.length) * 100;
+  // Filter concepts based on selected topic
+  const availableConcepts = useMemo(() => {
+    if (selectedTopicId === 'all') return mockConcepts;
+    return mockConcepts.filter(c => c.topicId === selectedTopicId);
+  }, [selectedTopicId]);
+
+  // Filter questions based on topic and concept selection
+  const filteredQuestions = useMemo(() => {
+    return mockQuestions.filter(question => {
+      const ru = mockRUs.find(r => r.id === question.ruId);
+      if (!ru) return false;
+      
+      const concept = mockConcepts.find(c => c.id === ru.conceptId);
+      if (!concept) return false;
+
+      // Check topic filter
+      if (selectedTopicId !== 'all' && concept.topicId !== selectedTopicId) {
+        return false;
+      }
+
+      // Check concept filter
+      if (selectedConceptId !== 'all' && concept.id !== selectedConceptId) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [selectedTopicId, selectedConceptId]);
+
+  const [answers, setAnswers] = useState<(AnswerState)[]>(
+    new Array(filteredQuestions.length).fill(null)
+  );
+
+  // Reset quiz state when filters change
+  useEffect(() => {
+    setCurrentIndex(0);
+    setAnswers(new Array(filteredQuestions.length).fill(null));
+    setSelectedAnswer(null);
+    setShowFeedback(false);
+    setIsComplete(false);
+  }, [filteredQuestions.length]);
+
+  // Reset concept filter when topic changes
+  useEffect(() => {
+    if (selectedTopicId !== 'all') {
+      const conceptStillValid = availableConcepts.some(c => c.id === selectedConceptId);
+      if (!conceptStillValid && selectedConceptId !== 'all') {
+        setSelectedConceptId('all');
+      }
+    }
+  }, [selectedTopicId, availableConcepts, selectedConceptId]);
+
+  const currentQuestion = filteredQuestions[currentIndex];
+  const progress = filteredQuestions.length > 0 ? ((currentIndex + 1) / filteredQuestions.length) * 100 : 0;
   const correctCount = answers.filter(a => a?.isCorrect).length;
   const answeredCount = answers.filter(a => a !== null).length;
 
   const handleSubmit = () => {
-    if (!selectedAnswer) return;
+    if (!selectedAnswer || !currentQuestion) return;
     
     const isCorrect = selectedAnswer === currentQuestion.correctAnswer;
     const newAnswers = [...answers];
@@ -49,7 +112,7 @@ export default function QuizPage() {
   };
 
   const handleNext = () => {
-    if (currentIndex < mockQuestions.length - 1) {
+    if (currentIndex < filteredQuestions.length - 1) {
       setCurrentIndex(currentIndex + 1);
       setSelectedAnswer(null);
       setShowFeedback(false);
@@ -60,14 +123,85 @@ export default function QuizPage() {
 
   const handleRestart = () => {
     setCurrentIndex(0);
-    setAnswers(new Array(mockQuestions.length).fill(null));
+    setAnswers(new Array(filteredQuestions.length).fill(null));
     setSelectedAnswer(null);
     setShowFeedback(false);
     setIsComplete(false);
   };
 
+  // Get current filter label for display
+  const getFilterLabel = () => {
+    if (selectedConceptId !== 'all') {
+      return mockConcepts.find(c => c.id === selectedConceptId)?.name || 'Quiz';
+    }
+    if (selectedTopicId !== 'all') {
+      return mockTopics.find(t => t.id === selectedTopicId)?.name || 'Quiz';
+    }
+    return 'All Topics';
+  };
+
+  // No questions available for current filter
+  if (filteredQuestions.length === 0) {
+    return (
+      <AppLayout>
+        <div className="flex flex-col min-h-full">
+          {/* Header with filters */}
+          <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-card/50">
+            <div className="flex items-center gap-3">
+              <Link to="/">
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+              </Link>
+              <div>
+                <h1 className="font-display font-semibold text-foreground">
+                  Practice Quiz
+                </h1>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <Filter className="h-4 w-4 text-muted-foreground" />
+              <Select value={selectedTopicId} onValueChange={setSelectedTopicId}>
+                <SelectTrigger className="w-[140px] h-8">
+                  <SelectValue placeholder="All Topics" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Topics</SelectItem>
+                  {mockTopics.map(topic => (
+                    <SelectItem key={topic.id} value={topic.id}>{topic.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={selectedConceptId} onValueChange={setSelectedConceptId}>
+                <SelectTrigger className="w-[160px] h-8">
+                  <SelectValue placeholder="All Concepts" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Concepts</SelectItem>
+                  {availableConcepts.map(concept => (
+                    <SelectItem key={concept.id} value={concept.id}>{concept.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </header>
+
+          <div className="flex-1 flex items-center justify-center p-8">
+            <div className="text-center">
+              <p className="text-muted-foreground mb-4">No questions available for the selected filters.</p>
+              <Button variant="outline" onClick={() => { setSelectedTopicId('all'); setSelectedConceptId('all'); }}>
+                Clear Filters
+              </Button>
+            </div>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
   if (isComplete) {
-    const score = (correctCount / mockQuestions.length) * 100;
+    const score = (correctCount / filteredQuestions.length) * 100;
     return (
       <AppLayout>
         <div className="flex items-center justify-center min-h-full p-8">
@@ -85,11 +219,12 @@ export default function QuizPage() {
               />
             </div>
             
+            <p className="text-sm text-muted-foreground mb-2">{getFilterLabel()}</p>
             <h1 className="font-display text-3xl font-bold text-foreground mb-2">
               {score >= 70 ? 'Great job!' : score >= 50 ? 'Good effort!' : 'Keep practicing!'}
             </h1>
             <p className="text-muted-foreground mb-8">
-              You got {correctCount} out of {mockQuestions.length} questions correct
+              You got {correctCount} out of {filteredQuestions.length} questions correct
             </p>
 
             <div className="grid grid-cols-3 gap-4 mb-8">
@@ -105,7 +240,7 @@ export default function QuizPage() {
               </Card>
               <Card className="p-4 text-center">
                 <Zap className="h-5 w-5 text-introduced mx-auto mb-2" />
-                <p className="text-2xl font-display font-bold text-foreground">{mockQuestions.length}</p>
+                <p className="text-2xl font-display font-bold text-foreground">{filteredQuestions.length}</p>
                 <p className="text-xs text-muted-foreground">Questions</p>
               </Card>
             </div>
@@ -130,7 +265,7 @@ export default function QuizPage() {
   return (
     <AppLayout>
       <div className="flex flex-col min-h-full">
-        {/* Header */}
+        {/* Header with filters */}
         <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-card/50">
           <div className="flex items-center gap-3">
             <Link to="/">
@@ -140,15 +275,40 @@ export default function QuizPage() {
             </Link>
             <div>
               <h1 className="font-display font-semibold text-foreground">
-                Practice Quiz
+                {getFilterLabel()}
               </h1>
               <p className="text-xs text-muted-foreground">
-                Question {currentIndex + 1} of {mockQuestions.length}
+                Question {currentIndex + 1} of {filteredQuestions.length}
               </p>
             </div>
           </div>
           
           <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Filter className="h-4 w-4 text-muted-foreground" />
+              <Select value={selectedTopicId} onValueChange={setSelectedTopicId}>
+                <SelectTrigger className="w-[140px] h-8">
+                  <SelectValue placeholder="All Topics" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Topics</SelectItem>
+                  {mockTopics.map(topic => (
+                    <SelectItem key={topic.id} value={topic.id}>{topic.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={selectedConceptId} onValueChange={setSelectedConceptId}>
+                <SelectTrigger className="w-[160px] h-8">
+                  <SelectValue placeholder="All Concepts" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Concepts</SelectItem>
+                  {availableConcepts.map(concept => (
+                    <SelectItem key={concept.id} value={concept.id}>{concept.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="text-right">
               <p className="text-sm font-medium text-foreground">{correctCount}/{answeredCount}</p>
               <p className="text-xs text-muted-foreground">correct</p>
@@ -284,7 +444,7 @@ export default function QuizPage() {
             </Button>
           ) : (
             <Button onClick={handleNext}>
-              {currentIndex < mockQuestions.length - 1 ? (
+              {currentIndex < filteredQuestions.length - 1 ? (
                 <>
                   Next
                   <ChevronRight className="h-4 w-4 ml-1" />
