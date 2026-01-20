@@ -11,7 +11,8 @@ import {
   Video,
   ExternalLink,
   Clock,
-  TrendingUp
+  TrendingUp,
+  GraduationCap
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -361,6 +362,14 @@ export default function ConceptDetail() {
           <Button className="flex-1">
             <Sparkles className="h-4 w-4 mr-2" />
             Start Learning
+          </Button>
+          <Button 
+            variant="secondary" 
+            className="flex-1"
+            onClick={() => navigate(`/quiz?conceptId=${conceptId}`)}
+          >
+            <GraduationCap className="h-4 w-4 mr-2" />
+            Start Quiz
           </Button>
           {reinforcementUnits.some(ru => ru.state === 'unstable' || ru.state === 'introduced') && (
             <Button variant="outline" className="flex-1">
