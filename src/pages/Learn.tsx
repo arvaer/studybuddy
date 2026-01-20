@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   ChevronLeft, 
@@ -14,7 +14,7 @@ import {
   Link as LinkIcon,
   ExternalLink
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
 import { ReinforcementPrompt } from "@/components/reinforcement-prompt";
 import { StateBadge } from "@/components/ui/state-badge";
@@ -24,7 +24,7 @@ import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { mockQuestions, mockNotes, mockRUs } from "@/lib/mockData";
+import { mockQuestions, mockNotes, mockRUs, mockConcepts, mockResources, mockTopics } from "@/lib/mockData";
 
 const sampleContent = `
 # Chapter 8: Photosynthesis
@@ -124,6 +124,10 @@ function VideoPlayer({ url }: { url: string }) {
 }
 
 export default function LearnPage() {
+  const [searchParams] = useSearchParams();
+  const conceptId = searchParams.get('conceptId');
+  const topicId = searchParams.get('topicId');
+  
   const [showPrompt, setShowPrompt] = useState(true);
   const [showNotes, setShowNotes] = useState(true);
   const [readProgress, setReadProgress] = useState(35);
@@ -132,9 +136,53 @@ export default function LearnPage() {
   const [loadedVideoUrl, setLoadedVideoUrl] = useState('');
   const [videoProgress, setVideoProgress] = useState(0);
 
-  const currentQuestion = mockQuestions[0];
-  const relevantNotes = mockNotes.filter(n => n.conceptId === 'c1');
-  const relevantRUs = mockRUs.filter(ru => ru.conceptId === 'c1');
+  // Get the current concept or topic context
+  const concept = useMemo(() => 
+    conceptId ? mockConcepts.find(c => c.id === conceptId) : null,
+    [conceptId]
+  );
+  
+  const topic = useMemo(() => {
+    if (topicId) return mockTopics.find(t => t.id === topicId);
+    if (concept?.topicId) return mockTopics.find(t => t.id === concept.topicId);
+    return null;
+  }, [topicId, concept]);
+  
+  // Get resources for this concept or topic
+  const resources = useMemo(() => {
+    if (conceptId) {
+      return mockResources.filter(r => r.conceptIds.includes(conceptId));
+    }
+    if (topicId) {
+      return mockResources.filter(r => r.topicId === topicId);
+    }
+    return mockResources;
+  }, [conceptId, topicId]);
+  
+  // Get the first video resource if available
+  const videoResource = useMemo(() => 
+    resources.find(r => (r.type === 'video' || r.type === 'lecture') && r.url),
+    [resources]
+  );
+
+  const sessionTitle = concept?.name || topic?.name || 'Study Session';
+  const sessionSubtitle = concept ? (topic?.name || 'Learning') : (topicId ? `${resources.length} resources` : 'All Topics');
+
+  // Filter relevant data based on context
+  const relevantConceptIds = conceptId 
+    ? [conceptId] 
+    : topicId 
+      ? mockConcepts.filter(c => c.topicId === topicId).map(c => c.id)
+      : mockConcepts.map(c => c.id);
+  
+  const relevantRUs = mockRUs.filter(ru => relevantConceptIds.includes(ru.conceptId));
+  const relevantNotes = mockNotes.filter(n => relevantConceptIds.includes(n.conceptId));
+  const relevantQuestions = mockQuestions.filter(q => {
+    const ru = mockRUs.find(r => r.id === q.ruId);
+    return ru && relevantConceptIds.includes(ru.conceptId);
+  });
+  
+  const currentQuestion = relevantQuestions[0] || mockQuestions[0];
 
   const handleLoadVideo = () => {
     if (videoUrl.trim()) {
@@ -159,10 +207,10 @@ export default function LearnPage() {
               </Link>
               <div>
                 <h1 className="font-display font-semibold text-foreground">
-                  {activeTab === 'reading' ? 'Photosynthesis Deep Dive' : 'Video Lecture'}
+                  {sessionTitle}
                 </h1>
                 <p className="text-xs text-muted-foreground">
-                  {activeTab === 'reading' ? 'Chapter 8' : 'Watch & Learn'}
+                  {sessionSubtitle}
                 </p>
               </div>
             </div>

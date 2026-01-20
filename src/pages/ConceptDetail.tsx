@@ -359,7 +359,10 @@ export default function ConceptDetail() {
           transition={{ delay: 0.3 }}
           className="mt-8 flex gap-3"
         >
-          <Button className="flex-1">
+          <Button 
+            className="flex-1"
+            onClick={() => navigate(`/learn?conceptId=${conceptId}`)}
+          >
             <Sparkles className="h-4 w-4 mr-2" />
             Start Learning
           </Button>
