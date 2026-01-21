@@ -1,7 +1,7 @@
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, FolderOpen, Folder, Plus, Trash2, FileText, Video, BookOpen, FileIcon, GraduationCap } from "lucide-react";
+import { ChevronDown, FolderOpen, Folder, Plus, Trash2, FileText, Video, BookOpen, FileIcon, GraduationCap, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Topic, Concept, ReinforcementUnit, Resource } from "@/types/study";
@@ -108,6 +108,19 @@ export function DroppableTopicCard({
             </motion.div>
           </div>
         </button>
+        
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mr-1 h-8 gap-1.5 text-muted-foreground hover:text-primary"
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/learn?topicId=${topic.id}`);
+          }}
+        >
+          <Sparkles className="h-4 w-4" />
+          <span className="hidden sm:inline">Learn</span>
+        </Button>
         
         <Button
           variant="ghost"
