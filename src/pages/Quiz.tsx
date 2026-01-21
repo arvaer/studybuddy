@@ -9,7 +9,8 @@ import {
   Trophy,
   Target,
   Zap,
-  Filter
+  Filter,
+  Settings2
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -26,6 +27,8 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { mockQuestions, mockTopics, mockConcepts, mockRUs } from "@/lib/mockData";
+import { QuizConfigModal } from "@/components/quiz-config-modal";
+import { QuizSessionConfig, defaultQuizConfig } from "@/types/study";
 
 type AnswerState = {
   answer: string;
@@ -43,6 +46,13 @@ export default function QuizPage() {
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [showFeedback, setShowFeedback] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [quizConfig, setQuizConfig] = useState<QuizSessionConfig>({
+    ...defaultQuizConfig,
+    topicId: initialTopicId === 'all' ? null : initialTopicId,
+    conceptId: initialConceptId === 'all' ? null : initialConceptId,
+  });
+  const [sessionStarted, setSessionStarted] = useState(true);
 
   // Filter concepts based on selected topic
   const availableConcepts = useMemo(() => {
@@ -138,6 +148,27 @@ export default function QuizPage() {
       return mockTopics.find(t => t.id === selectedTopicId)?.name || 'Quiz';
     }
     return 'All Topics';
+  };
+
+  // Calculate due and new cards for SRS display
+  const dueCards = useMemo(() => {
+    return filteredQuestions.filter(q => {
+      const ru = mockRUs.find(r => r.id === q.ruId);
+      return ru && (ru.state === 'unstable' || ru.state === 'introduced');
+    }).length;
+  }, [filteredQuestions]);
+
+  const newCards = useMemo(() => {
+    return filteredQuestions.filter(q => {
+      const ru = mockRUs.find(r => r.id === q.ruId);
+      return ru && ru.state === 'introduced';
+    }).length;
+  }, [filteredQuestions]);
+
+  const handleStartQuiz = () => {
+    setShowConfigModal(false);
+    setSessionStarted(true);
+    handleRestart();
   };
 
   // No questions available for current filter
@@ -308,6 +339,14 @@ export default function QuizPage() {
                   ))}
                 </SelectContent>
               </Select>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setShowConfigModal(true)}
+              >
+                <Settings2 className="h-4 w-4" />
+              </Button>
             </div>
             <div className="text-right">
               <p className="text-sm font-medium text-foreground">{correctCount}/{answeredCount}</p>
@@ -456,6 +495,18 @@ export default function QuizPage() {
           )}
         </footer>
       </div>
+
+      {/* Quiz Config Modal */}
+      <QuizConfigModal
+        open={showConfigModal}
+        onOpenChange={setShowConfigModal}
+        config={quizConfig}
+        onConfigChange={setQuizConfig}
+        onStartQuiz={handleStartQuiz}
+        availableCards={filteredQuestions.length}
+        dueCards={dueCards}
+        newCards={newCards}
+      />
     </AppLayout>
   );
 }

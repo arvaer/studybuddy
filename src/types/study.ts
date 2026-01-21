@@ -87,3 +87,62 @@ export interface LearnerProgress {
   streakDays: number;
   totalStudyTime: number; // in minutes
 }
+
+// Quiz Session Configuration Types
+export type StudyMode = 'srs' | 'cram';
+export type SessionLengthType = 'unlimited' | 'cards' | 'time';
+export type CardPriority = 'due-first' | 'random' | 'hardest-first' | 'newest-first';
+
+export interface SRSSettings {
+  newCardsPerDay: number;
+  reviewsPerDay: number;
+  learningSteps: number[]; // intervals in minutes, e.g., [1, 10, 60]
+  graduatingInterval: number; // days until card graduates to review
+  easyBonus: number; // multiplier for easy cards
+  intervalModifier: number; // global interval multiplier (0.5 - 2.0)
+}
+
+export interface CramSettings {
+  includeStable: boolean; // include already mastered cards
+  priority: CardPriority;
+  shuffleOrder: boolean;
+  repeatMissed: boolean; // repeat missed cards at end
+}
+
+export interface QuizSessionConfig {
+  studyMode: StudyMode;
+  sessionLengthType: SessionLengthType;
+  cardLimit: number; // number of cards if sessionLengthType is 'cards'
+  timeLimit: number; // minutes if sessionLengthType is 'time'
+  srsSettings: SRSSettings;
+  cramSettings: CramSettings;
+  topicId: string | null;
+  conceptId: string | null;
+}
+
+export const defaultSRSSettings: SRSSettings = {
+  newCardsPerDay: 20,
+  reviewsPerDay: 100,
+  learningSteps: [1, 10, 60],
+  graduatingInterval: 1,
+  easyBonus: 1.3,
+  intervalModifier: 1.0,
+};
+
+export const defaultCramSettings: CramSettings = {
+  includeStable: true,
+  priority: 'random',
+  shuffleOrder: true,
+  repeatMissed: true,
+};
+
+export const defaultQuizConfig: QuizSessionConfig = {
+  studyMode: 'srs',
+  sessionLengthType: 'unlimited',
+  cardLimit: 20,
+  timeLimit: 15,
+  srsSettings: defaultSRSSettings,
+  cramSettings: defaultCramSettings,
+  topicId: null,
+  conceptId: null,
+};
