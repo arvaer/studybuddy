@@ -46,13 +46,13 @@ export default function QuizPage() {
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [showFeedback, setShowFeedback] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
-  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [showConfigModal, setShowConfigModal] = useState(true);
   const [quizConfig, setQuizConfig] = useState<QuizSessionConfig>({
     ...defaultQuizConfig,
     topicId: initialTopicId === 'all' ? null : initialTopicId,
     conceptId: initialConceptId === 'all' ? null : initialConceptId,
   });
-  const [sessionStarted, setSessionStarted] = useState(true);
+  const [sessionStarted, setSessionStarted] = useState(false);
 
   // Filter concepts based on selected topic
   const availableConcepts = useMemo(() => {
