@@ -57,12 +57,16 @@
     --gradient-cool: linear-gradient(135deg, hsl(220 70% 55%) 0%, hsl(250 60% 55%) 100%);
     --gradient-success: linear-gradient(135deg, hsl(152 60% 42%) 0%, hsl(170 60% 40%) 100%);
     --gradient-surface: linear-gradient(180deg, hsl(40 20% 99%) 0%, hsl(40 20% 96%) 100%);
+    --gradient-primary: linear-gradient(135deg, hsl(220 40% 20%) 0%, hsl(220 50% 30%) 100%);
 
     /* Shadows */
     --shadow-sm: 0 1px 2px 0 hsl(220 25% 10% / 0.03);
     --shadow-md: 0 4px 6px -1px hsl(220 25% 10% / 0.05), 0 2px 4px -2px hsl(220 25% 10% / 0.05);
     --shadow-lg: 0 10px 15px -3px hsl(220 25% 10% / 0.08), 0 4px 6px -4px hsl(220 25% 10% / 0.05);
+    --shadow-xl: 0 20px 25px -5px hsl(220 25% 10% / 0.1), 0 8px 10px -6px hsl(220 25% 10% / 0.05);
     --shadow-glow: 0 0 20px hsl(38 92% 50% / 0.2);
+    --shadow-glow-stable: 0 0 20px hsl(152 60% 42% / 0.2);
+    --shadow-glow-primary: 0 0 30px hsl(220 40% 20% / 0.15);
 
     /* Sidebar */
     --sidebar-background: 40 20% 97%;
@@ -143,11 +147,162 @@
     background: var(--gradient-success);
   }
 
+  .gradient-primary {
+    background: var(--gradient-primary);
+  }
+
   .shadow-glow {
     box-shadow: var(--shadow-glow);
   }
 
+  .shadow-glow-stable {
+    box-shadow: var(--shadow-glow-stable);
+  }
+
   .text-balance {
     text-wrap: balance;
+  }
+
+  /* Glass morphism */
+  .glass {
+    @apply bg-card/80 backdrop-blur-xl border-border/50;
+  }
+
+  .glass-subtle {
+    @apply bg-card/60 backdrop-blur-md border-border/30;
+  }
+
+  /* Shimmer effect for loading states */
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      hsl(var(--accent) / 0.1) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite;
+  }
+
+  /* Floating animation */
+  .float {
+    animation: float 6s ease-in-out infinite;
+  }
+
+  /* Gradient text */
+  .text-gradient {
+    @apply bg-clip-text text-transparent;
+    background-image: var(--gradient-warm);
+  }
+
+  .text-gradient-cool {
+    @apply bg-clip-text text-transparent;
+    background-image: var(--gradient-cool);
+  }
+
+  /* Refined card styles */
+  .card-elevated {
+    @apply relative overflow-hidden rounded-xl border border-border/50 bg-card shadow-soft;
+    @apply transition-all duration-300 ease-out;
+    @apply hover:border-border hover:shadow-medium hover:-translate-y-0.5;
+  }
+
+  .card-interactive {
+    @apply card-elevated cursor-pointer;
+    @apply active:scale-[0.99] active:shadow-soft;
+  }
+
+  /* Glow ring on focus */
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+  }
+
+  /* Subtle pattern overlay */
+  .pattern-dots {
+    background-image: radial-gradient(hsl(var(--muted-foreground) / 0.15) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  /* Smooth underline animation */
+  .underline-animated {
+    @apply relative;
+  }
+
+  .underline-animated::after {
+    content: '';
+    @apply absolute bottom-0 left-0 h-0.5 w-0 bg-primary transition-all duration-300;
+  }
+
+  .underline-animated:hover::after {
+    @apply w-full;
+  }
+}
+
+@layer components {
+  /* Premium badge styles */
+  .badge-glow {
+    @apply relative overflow-hidden;
+  }
+
+  .badge-glow::before {
+    content: '';
+    @apply absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent;
+    @apply -translate-x-full animate-[shimmer_2s_infinite];
+  }
+
+  /* Stat number with gradient */
+  .stat-value {
+    @apply font-display text-3xl font-bold tracking-tight;
+    @apply bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text;
+  }
+
+  /* Smooth icon container */
+  .icon-container {
+    @apply flex items-center justify-center rounded-xl transition-all duration-300;
+    @apply bg-gradient-to-br from-muted to-muted/50;
+  }
+
+  /* Progress bar with glow */
+  .progress-glow {
+    @apply relative overflow-hidden;
+  }
+
+  .progress-glow::after {
+    content: '';
+    @apply absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent;
+    @apply animate-[shimmer_3s_infinite];
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.95);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(0.95);
+    opacity: 1;
   }
 }

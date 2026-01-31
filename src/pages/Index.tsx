@@ -21,7 +21,9 @@ import {
   Flame,
   TrendingUp,
   Plus,
-  FileQuestion
+  FileQuestion,
+  Sparkles,
+  ArrowRight
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { DraggableConceptCard } from "@/components/draggable-concept-card";
@@ -38,13 +40,17 @@ const container = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
-    transition: { staggerChildren: 0.05 }
+    transition: { staggerChildren: 0.06 }
   }
-};
+} as const;
 
 const item = {
   hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0 }
+  show: { 
+    opacity: 1, 
+    y: 0,
+    transition: { type: "spring" as const, stiffness: 300, damping: 24 }
+  }
 };
 
 // Uncategorized drop zone component
@@ -60,13 +66,27 @@ function UncategorizedDropZone({
   isOver: boolean;
 }) {
   return (
-    <div className={cn(
-      "mt-6 p-4 rounded-xl border-2 border-dashed transition-all duration-200",
-      isOver ? "border-primary/50 bg-primary/5" : "border-border"
-    )}>
-      <div className="flex items-center gap-2 mb-3">
-        <FileQuestion className="h-4 w-4 text-muted-foreground" />
-        <h3 className="text-sm font-medium text-muted-foreground">
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className={cn(
+        "mt-6 p-5 rounded-2xl border-2 border-dashed transition-all duration-300",
+        isOver 
+          ? "border-primary/50 bg-primary/5 scale-[1.01]" 
+          : "border-border/70 bg-muted/20"
+      )}
+    >
+      <div className="flex items-center gap-2.5 mb-4">
+        <div className={cn(
+          "flex items-center justify-center h-8 w-8 rounded-lg transition-colors",
+          isOver ? "bg-primary/10" : "bg-muted"
+        )}>
+          <FileQuestion className={cn(
+            "h-4 w-4 transition-colors",
+            isOver ? "text-primary" : "text-muted-foreground"
+          )} />
+        </div>
+        <h3 className="text-sm font-semibold text-muted-foreground">
           Uncategorized
         </h3>
       </div>
@@ -91,13 +111,13 @@ function UncategorizedDropZone({
       </SortableContext>
       
       {concepts.length === 0 && (
-        <div className="text-center py-6">
+        <div className="text-center py-8">
           <p className="text-sm text-muted-foreground">
             {isOver ? "Drop concept here" : "Drag concepts here to uncategorize"}
           </p>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
@@ -212,19 +232,43 @@ export default function Dashboard() {
 
   return (
     <AppLayout>
-      <div className="p-8 max-w-6xl mx-auto">
+      <div className="p-8 max-w-7xl mx-auto">
         {/* Header */}
         <motion.header 
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-8"
+          transition={{ type: "spring", stiffness: 300, damping: 24 }}
+          className="mb-10"
         >
-          <h1 className="font-display text-3xl font-bold text-foreground tracking-tight">
-            Welcome back
-          </h1>
-          <p className="mt-1 text-muted-foreground">
-            Continue where you left off or start something new
-          </p>
+          <div className="flex items-start justify-between">
+            <div>
+              <motion.div
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.1 }}
+                className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 mb-3"
+              >
+                <Sparkles className="h-3.5 w-3.5 text-accent" />
+                <span className="text-xs font-semibold text-accent">Ready to learn</span>
+              </motion.div>
+              <h1 className="font-display text-4xl font-bold text-foreground tracking-tight">
+                Welcome back
+              </h1>
+              <p className="mt-2 text-lg text-muted-foreground">
+                Continue where you left off or start something new
+              </p>
+            </div>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.2 }}
+            >
+              <Button size="lg" className="gap-2 shadow-md hover:shadow-lg transition-shadow">
+                Start Session
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </motion.div>
+          </div>
         </motion.header>
 
         {/* Stats Grid */}
@@ -232,7 +276,7 @@ export default function Dashboard() {
           variants={container}
           initial="hidden"
           animate="show"
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8"
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-10"
         >
           <motion.div variants={item}>
             <StatsCard
@@ -285,15 +329,20 @@ export default function Dashboard() {
             animate="show"
             className="lg:col-span-2"
           >
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <BookOpen className="h-5 w-5 text-muted-foreground" />
-                <h2 className="font-display text-lg font-semibold text-foreground">
-                  Your Topics
-                </h2>
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center h-10 w-10 rounded-xl bg-primary/10">
+                  <BookOpen className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h2 className="font-display text-xl font-bold text-foreground">
+                    Your Topics
+                  </h2>
+                  <p className="text-sm text-muted-foreground">{topics.length} topics · {concepts.length} concepts</p>
+                </div>
               </div>
-              <Button variant="outline" size="sm" className="gap-1.5">
-                <Plus className="h-3.5 w-3.5" />
+              <Button variant="outline" size="sm" className="gap-2 shadow-sm hover:shadow transition-shadow">
+                <Plus className="h-4 w-4" />
                 Add Topic
               </Button>
             </div>
@@ -337,7 +386,7 @@ export default function Dashboard() {
               {/* Drag Overlay */}
               <DragOverlay>
                 {activeConcept ? (
-                  <Card className="p-4 shadow-lg bg-card border-primary/20 opacity-95">
+                  <Card className="p-4 shadow-xl bg-card border-primary/30 opacity-95 rotate-2">
                     <p className="font-semibold text-foreground">{activeConcept.name}</p>
                     <p className="text-sm text-muted-foreground truncate">{activeConcept.description}</p>
                   </Card>
@@ -352,24 +401,36 @@ export default function Dashboard() {
             initial="hidden"
             animate="show"
           >
-            <div className="flex items-center gap-2 mb-4">
-              <TrendingUp className="h-5 w-5 text-muted-foreground" />
-              <h2 className="font-display text-lg font-semibold text-foreground">
-                Recent Sessions
-              </h2>
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center h-10 w-10 rounded-xl bg-stable/10">
+                  <TrendingUp className="h-5 w-5 text-stable" />
+                </div>
+                <div>
+                  <h2 className="font-display text-xl font-bold text-foreground">
+                    Recent Sessions
+                  </h2>
+                  <p className="text-sm text-muted-foreground">Your learning history</p>
+                </div>
+              </div>
             </div>
             
             <div className="space-y-3">
-              {mockSessions.map((session) => (
-                <motion.div key={session.id} variants={item}>
+              {mockSessions.map((session, index) => (
+                <motion.div 
+                  key={session.id} 
+                  variants={item}
+                  custom={index}
+                >
                   <SessionCard session={session} />
                 </motion.div>
               ))}
             </div>
             
-            <motion.div variants={item} className="mt-4">
-              <Button variant="outline" className="w-full">
+            <motion.div variants={item} className="mt-5">
+              <Button variant="outline" className="w-full gap-2 shadow-sm hover:shadow transition-shadow">
                 View All Sessions
+                <ArrowRight className="h-4 w-4" />
               </Button>
             </motion.div>
           </motion.section>
