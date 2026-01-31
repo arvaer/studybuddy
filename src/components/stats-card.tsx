@@ -25,23 +25,31 @@ export function StatsCard({
   const variantStyles = {
     default: {
       bg: 'bg-card',
-      iconBg: 'bg-muted',
+      iconBg: 'bg-gradient-to-br from-muted to-muted/60',
       iconColor: 'text-foreground',
+      glowColor: '',
+      borderHover: 'hover:border-border',
     },
     accent: {
-      bg: 'bg-accent/5',
-      iconBg: 'bg-accent/10',
+      bg: 'bg-gradient-to-br from-accent/8 via-accent/5 to-transparent',
+      iconBg: 'bg-gradient-to-br from-accent/20 to-accent/10',
       iconColor: 'text-accent',
+      glowColor: 'group-hover:shadow-glow',
+      borderHover: 'hover:border-accent/30',
     },
     stable: {
-      bg: 'bg-stable/5',
-      iconBg: 'bg-stable/10',
+      bg: 'bg-gradient-to-br from-stable/8 via-stable/5 to-transparent',
+      iconBg: 'bg-gradient-to-br from-stable/20 to-stable/10',
       iconColor: 'text-stable',
+      glowColor: 'group-hover:shadow-glow-stable',
+      borderHover: 'hover:border-stable/30',
     },
     unstable: {
-      bg: 'bg-unstable/5',
-      iconBg: 'bg-unstable/10',
+      bg: 'bg-gradient-to-br from-unstable/8 via-unstable/5 to-transparent',
+      iconBg: 'bg-gradient-to-br from-unstable/20 to-unstable/10',
       iconColor: 'text-unstable',
+      glowColor: '',
+      borderHover: 'hover:border-unstable/30',
     },
   };
 
@@ -49,39 +57,64 @@ export function StatsCard({
 
   return (
     <motion.div
-      whileHover={{ y: -2 }}
+      whileHover={{ y: -4, scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
       transition={{ type: "spring", stiffness: 400, damping: 25 }}
       className={cn(
-        "rounded-xl border border-border/50 p-5 shadow-soft transition-all duration-300",
-        "hover:border-border hover:shadow-medium",
-        styles.bg
+        "group relative rounded-2xl border border-border/50 p-6 shadow-soft transition-all duration-300",
+        "hover:shadow-elevated",
+        styles.bg,
+        styles.borderHover,
+        styles.glowColor
       )}
     >
-      <div className="flex items-start justify-between">
-        <div className={cn(
-          "flex items-center justify-center h-10 w-10 rounded-lg",
-          styles.iconBg
-        )}>
-          <Icon className={cn("h-5 w-5", styles.iconColor)} />
+      {/* Subtle shimmer overlay for accent variants */}
+      {variant !== 'default' && (
+        <div className="absolute inset-0 rounded-2xl overflow-hidden opacity-0 group-hover:opacity-100 transition-opacity duration-500">
+          <div className="shimmer absolute inset-0" />
         </div>
+      )}
+      
+      <div className="relative z-10 flex items-start justify-between">
+        <motion.div 
+          whileHover={{ rotate: [0, -5, 5, 0], scale: 1.1 }}
+          transition={{ duration: 0.4 }}
+          className={cn(
+            "flex items-center justify-center h-12 w-12 rounded-xl",
+            styles.iconBg
+          )}
+        >
+          <Icon className={cn("h-6 w-6", styles.iconColor)} />
+        </motion.div>
         
         {trend && (
-          <span className={cn(
-            "text-xs font-medium",
-            trend.isPositive ? "text-stable" : "text-unstable"
-          )}>
-            {trend.isPositive ? '+' : ''}{trend.value}%
-          </span>
+          <motion.span 
+            initial={{ opacity: 0, y: -5 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={cn(
+              "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold",
+              trend.isPositive 
+                ? "bg-stable/15 text-stable" 
+                : "bg-unstable/15 text-unstable"
+            )}
+          >
+            {trend.isPositive ? '↑' : '↓'} {trend.value}%
+          </motion.span>
         )}
       </div>
       
-      <div className="mt-4">
-        <p className="text-sm font-medium text-muted-foreground">{title}</p>
-        <p className="mt-1 font-display text-3xl font-bold text-foreground tracking-tight">
+      <div className="relative z-10 mt-5">
+        <p className="text-sm font-medium text-muted-foreground tracking-wide">{title}</p>
+        <motion.p 
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="mt-1.5 font-display text-4xl font-bold text-foreground tracking-tight"
+        >
           {value}
-        </p>
+        </motion.p>
         {subtitle && (
-          <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
         )}
       </div>
     </motion.div>
