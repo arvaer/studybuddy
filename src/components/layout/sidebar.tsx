@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { 
   LayoutDashboard, 
   BookOpen, 
@@ -9,10 +9,12 @@ import {
   ChevronLeft,
   GraduationCap,
   Flame,
-  Sparkles
+  Sparkles,
+  LogOut
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/contexts/AuthContext";
 
 const navItems = [
   { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -24,6 +26,8 @@ const navItems = [
 export function Sidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
 
   return (
     <motion.aside
@@ -191,22 +195,43 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Bottom section */}
-      <div className="relative z-10 px-3 pb-4">
-        <AnimatePresence mode="wait">
-          {!isCollapsed && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="p-3 rounded-xl bg-muted/50 border border-border/50"
-            >
-              <p className="text-xs text-muted-foreground text-center">
-                v1.0 Beta · Made with ❤️
-              </p>
-            </motion.div>
-          )}
-        </AnimatePresence>
+      {/* User section */}
+      <div className="relative z-10 px-3 pb-4 space-y-2">
+        <div className={cn(
+          "flex items-center gap-3 p-3 rounded-xl bg-muted/50 border border-border/50",
+          isCollapsed && "justify-center p-2"
+        )}>
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">
+            {user?.displayName?.charAt(0) ?? "?"}
+          </div>
+          <AnimatePresence mode="wait">
+            {!isCollapsed && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="flex-1 min-w-0"
+              >
+                <p className="text-sm font-medium text-foreground truncate">{user?.displayName}</p>
+                <p className="text-[10px] text-muted-foreground truncate">{user?.email}</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <AnimatePresence mode="wait">
+            {!isCollapsed && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                  onClick={() => { logout(); navigate("/auth"); }}
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
 
       {/* Collapse toggle */}
