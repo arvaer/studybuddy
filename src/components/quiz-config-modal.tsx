@@ -176,41 +176,8 @@ export function QuizConfigModal({
                 </p>
               </div>
 
-              {/* Cram Options */}
+              {/* Card Priority */}
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label className="text-sm font-medium">Include Mastered Cards</Label>
-                    <p className="text-xs text-muted-foreground">Review cards you already know well</p>
-                  </div>
-                  <Switch
-                    checked={config.cramSettings.includeStable}
-                    onCheckedChange={(checked) => updateCramSettings({ includeStable: checked })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label className="text-sm font-medium">Shuffle Order</Label>
-                    <p className="text-xs text-muted-foreground">Randomize card presentation</p>
-                  </div>
-                  <Switch
-                    checked={config.cramSettings.shuffleOrder}
-                    onCheckedChange={(checked) => updateCramSettings({ shuffleOrder: checked })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label className="text-sm font-medium">Repeat Missed</Label>
-                    <p className="text-xs text-muted-foreground">Show incorrect cards again at end</p>
-                  </div>
-                  <Switch
-                    checked={config.cramSettings.repeatMissed}
-                    onCheckedChange={(checked) => updateCramSettings({ repeatMissed: checked })}
-                  />
-                </div>
-
                 <div className="space-y-2">
                   <Label className="text-sm font-medium">Card Priority</Label>
                   <div className="grid grid-cols-2 gap-2">
@@ -231,6 +198,51 @@ export function QuizConfigModal({
                     ))}
                   </div>
                 </div>
+
+                {/* Collapsible Cram Options */}
+                <Collapsible>
+                  <CollapsibleTrigger className="flex items-center justify-between w-full p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors">
+                    <span className="text-sm font-medium flex items-center gap-2">
+                      <Settings2 className="h-4 w-4" />
+                      Configure Options
+                    </span>
+                    <ChevronDown className="h-4 w-4 transition-transform duration-200 [[data-state=open]>&]:rotate-180" />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="pt-3 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label className="text-sm font-medium">Include Mastered Cards</Label>
+                          <p className="text-xs text-muted-foreground">Review cards you already know well</p>
+                        </div>
+                        <Switch
+                          checked={config.cramSettings.includeStable}
+                          onCheckedChange={(checked) => updateCramSettings({ includeStable: checked })}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label className="text-sm font-medium">Shuffle Order</Label>
+                          <p className="text-xs text-muted-foreground">Randomize card presentation</p>
+                        </div>
+                        <Switch
+                          checked={config.cramSettings.shuffleOrder}
+                          onCheckedChange={(checked) => updateCramSettings({ shuffleOrder: checked })}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label className="text-sm font-medium">Repeat Missed</Label>
+                          <p className="text-xs text-muted-foreground">Show incorrect cards again at end</p>
+                        </div>
+                        <Switch
+                          checked={config.cramSettings.repeatMissed}
+                          onCheckedChange={(checked) => updateCramSettings({ repeatMissed: checked })}
+                        />
+                      </div>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
               </div>
             </TabsContent>
           </Tabs>
