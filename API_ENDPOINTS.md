@@ -136,7 +136,7 @@ This document describes the REST API endpoints the frontend expects. All endpoin
 |--------|----------|-------------|
 | `POST` | `/api/quiz-sessions` | Start a quiz session. Body: `QuizSessionConfig` (see below). Returns session with assigned questions. |
 | `GET` | `/api/quiz-sessions/:sessionId` | Get session progress and results. |
-| `POST` | `/api/quiz-sessions/:sessionId/submit` | Submit a single answer within a session. Body: `{ questionId, answer }`. |
+| `POST` | `/api/quiz-sessions/:sessionId/submit` | Submit a single answer within a session. Body: `{ questionId, answer }`. Returns `{ isCorrect, explanation, updatedRU }`. |
 | `POST` | `/api/quiz-sessions/:sessionId/complete` | Mark session as complete. Returns final score summary. |
 
 ### QuizSessionConfig
@@ -165,6 +165,81 @@ This document describes the REST API endpoints the frontend expects. All endpoin
   }
 }
 ```
+
+### Session Result (from `/complete`)
+
+```json
+{
+  "sessionId": "string",
+  "totalQuestions": "number",
+  "correctCount": "number",
+  "accuracy": "number (0–100)",
+  "studyMode": "srs | cram",
+  "duration": "number (seconds)",
+  "completedAt": "ISO 8601"
+}
+```
+
+---
+
+## Quiz AI Chat
+
+Contextual AI chat available during quiz sessions. The frontend injects the current question context (prompt, correct answer, explanation, user's answer, and correctness) into each request so the AI can provide targeted help.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/quiz-sessions/:sessionId/chat` | Send a chat message within a quiz session. Returns an AI-generated response. |
+| `GET` | `/api/quiz-sessions/:sessionId/chat` | Retrieve the chat history for a specific quiz session. |
+
+### Chat Request Body
+
+```json
+{
+  "message": "string",
+  "questionContext": {
+    "questionId": "string",
+    "questionPrompt": "string",
+    "correctAnswer": "string",
+    "explanation": "string",
+    "userAnswer": "string | null",
+    "wasCorrect": "boolean | null"
+  }
+}
+```
+
+### Chat Response
+
+```json
+{
+  "id": "string",
+  "role": "assistant",
+  "content": "string",
+  "createdAt": "ISO 8601"
+}
+```
+
+### Chat History Response (from `GET`)
+
+```json
+{
+  "sessionId": "string",
+  "questionId": "string",
+  "messages": [
+    {
+      "id": "string",
+      "role": "user | assistant | system",
+      "content": "string",
+      "createdAt": "ISO 8601"
+    }
+  ]
+}
+```
+
+### Behavior Notes
+
+- Chat history resets per question — when the user navigates to the next question, a new conversation thread begins.
+- The `questionContext` is sent with every message so the backend can ground responses without maintaining complex state.
+- The system prompt should instruct the AI to: explain why the correct answer is right, offer hints without giving away the answer (if not yet answered), and relate the question back to the underlying concept/RU.
 
 ---
 
