@@ -114,9 +114,6 @@ export function QuizConfigModal({
             <Settings2 className="h-5 w-5 text-primary" />
             Configure Quiz Session
           </DialogTitle>
-          <DialogDescription>
-            Customize how you want to study. Choose between spaced repetition or cram mode.
-          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6 py-4">
