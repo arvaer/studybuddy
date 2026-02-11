@@ -10,7 +10,8 @@ import {
   Target,
   Zap,
   Filter,
-  Settings2
+  Settings2,
+  MessageCircleQuestion
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -28,6 +29,14 @@ import {
 import { cn } from "@/lib/utils";
 import { mockQuestions, mockTopics, mockConcepts, mockRUs } from "@/lib/mockData";
 import { QuizConfigModal } from "@/components/quiz-config-modal";
+import { QuizAiChat } from "@/components/quiz-ai-chat";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { QuizSessionConfig, defaultQuizConfig } from "@/types/study";
 
 type AnswerState = {
@@ -476,6 +485,30 @@ export default function QuizPage() {
             <ChevronLeft className="h-4 w-4 mr-1" />
             Previous
           </Button>
+
+          <Sheet>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="sm" className="text-muted-foreground gap-1.5">
+                <MessageCircleQuestion className="h-4 w-4" />
+                Have a question?
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="p-0 w-[380px] sm:max-w-[380px] flex flex-col">
+              <SheetHeader className="px-4 pt-4 pb-0">
+                <SheetTitle className="text-base">Chat with AI</SheetTitle>
+              </SheetHeader>
+              <div className="flex-1 overflow-hidden">
+                <QuizAiChat
+                  questionPrompt={currentQuestion.prompt}
+                  questionOptions={currentQuestion.options}
+                  correctAnswer={currentQuestion.correctAnswer}
+                  explanation={currentQuestion.explanation}
+                  userAnswer={answers[currentIndex]?.answer}
+                  wasCorrect={answers[currentIndex]?.isCorrect}
+                />
+              </div>
+            </SheetContent>
+          </Sheet>
 
           {!showFeedback ? (
             <Button onClick={handleSubmit} disabled={!selectedAnswer}>
