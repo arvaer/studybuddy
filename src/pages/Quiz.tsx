@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  ChevronLeft, 
-  ChevronRight, 
-  Check, 
+import {
+  ChevronLeft,
+  ChevronRight,
+  Check,
   X as XIcon,
   RotateCcw,
   Trophy,
@@ -12,6 +12,7 @@ import {
   Filter,
   Settings2,
   MessageCircleQuestion
+  Loader2
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -27,7 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { mockQuestions, mockTopics, mockConcepts, mockRUs } from "@/lib/mockData";
+import { fetchTopics, fetchConcepts, fetchQuestions, fetchRUs } from "@/lib/api";
 import { QuizConfigModal } from "@/components/quiz-config-modal";
 import { QuizAiChat } from "@/components/quiz-ai-chat";
 import {
@@ -37,6 +38,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import type { Topic, Concept, Question, ReinforcementUnit } from "@/types/study";
 import { QuizSessionConfig, defaultQuizConfig } from "@/types/study";
 
 type AnswerState = {
@@ -48,6 +50,12 @@ export default function QuizPage() {
   const [searchParams] = useSearchParams();
   const initialTopicId = searchParams.get('topicId') || 'all';
   const initialConceptId = searchParams.get('conceptId') || 'all';
+
+  const [topics, setTopics] = useState<Topic[]>([]);
+  const [allConcepts, setAllConcepts] = useState<Concept[]>([]);
+  const [allQuestions, setAllQuestions] = useState<Question[]>([]);
+  const [allRUs, setAllRUs] = useState<ReinforcementUnit[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const [selectedTopicId, setSelectedTopicId] = useState(initialTopicId);
   const [selectedConceptId, setSelectedConceptId] = useState(initialConceptId);
@@ -63,19 +71,45 @@ export default function QuizPage() {
   });
   const [sessionStarted, setSessionStarted] = useState(false);
 
+  // Fetch data on mount
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const [t, c, q, r] = await Promise.all([
+          fetchTopics(),
+          fetchConcepts(),
+          fetchQuestions(),
+          fetchRUs(),
+        ]);
+        if (cancelled) return;
+        setTopics(t);
+        setAllConcepts(c);
+        setAllQuestions(q);
+        setAllRUs(r);
+      } catch (err) {
+        console.error("Failed to load quiz data:", err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
   // Filter concepts based on selected topic
   const availableConcepts = useMemo(() => {
-    if (selectedTopicId === 'all') return mockConcepts;
-    return mockConcepts.filter(c => c.topicId === selectedTopicId);
-  }, [selectedTopicId]);
+    if (selectedTopicId === 'all') return allConcepts;
+    return allConcepts.filter(c => c.topicId === selectedTopicId);
+  }, [selectedTopicId, allConcepts]);
 
   // Filter questions based on topic and concept selection
   const filteredQuestions = useMemo(() => {
-    return mockQuestions.filter(question => {
-      const ru = mockRUs.find(r => r.id === question.ruId);
+    return allQuestions.filter(question => {
+      const ru = allRUs.find(r => r.id === question.ruId);
       if (!ru) return false;
-      
-      const concept = mockConcepts.find(c => c.id === ru.conceptId);
+
+      const concept = allConcepts.find(c => c.id === ru.conceptId);
       if (!concept) return false;
 
       // Check topic filter
@@ -90,7 +124,7 @@ export default function QuizPage() {
 
       return true;
     });
-  }, [selectedTopicId, selectedConceptId]);
+  }, [selectedTopicId, selectedConceptId, allQuestions, allRUs, allConcepts]);
 
   const [answers, setAnswers] = useState<(AnswerState)[]>(
     new Array(filteredQuestions.length).fill(null)
@@ -122,7 +156,7 @@ export default function QuizPage() {
 
   const handleSubmit = () => {
     if (!selectedAnswer || !currentQuestion) return;
-    
+
     const isCorrect = selectedAnswer === currentQuestion.correctAnswer;
     const newAnswers = [...answers];
     newAnswers[currentIndex] = { answer: selectedAnswer, isCorrect };
@@ -151,10 +185,10 @@ export default function QuizPage() {
   // Get current filter label for display
   const getFilterLabel = () => {
     if (selectedConceptId !== 'all') {
-      return mockConcepts.find(c => c.id === selectedConceptId)?.name || 'Quiz';
+      return allConcepts.find(c => c.id === selectedConceptId)?.name || 'Quiz';
     }
     if (selectedTopicId !== 'all') {
-      return mockTopics.find(t => t.id === selectedTopicId)?.name || 'Quiz';
+      return topics.find(t => t.id === selectedTopicId)?.name || 'Quiz';
     }
     return 'All Topics';
   };
@@ -162,23 +196,33 @@ export default function QuizPage() {
   // Calculate due and new cards for SRS display
   const dueCards = useMemo(() => {
     return filteredQuestions.filter(q => {
-      const ru = mockRUs.find(r => r.id === q.ruId);
+      const ru = allRUs.find(r => r.id === q.ruId);
       return ru && (ru.state === 'unstable' || ru.state === 'introduced');
     }).length;
-  }, [filteredQuestions]);
+  }, [filteredQuestions, allRUs]);
 
   const newCards = useMemo(() => {
     return filteredQuestions.filter(q => {
-      const ru = mockRUs.find(r => r.id === q.ruId);
+      const ru = allRUs.find(r => r.id === q.ruId);
       return ru && ru.state === 'introduced';
     }).length;
-  }, [filteredQuestions]);
+  }, [filteredQuestions, allRUs]);
 
   const handleStartQuiz = () => {
     setShowConfigModal(false);
     setSessionStarted(true);
     handleRestart();
   };
+
+  if (loading) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center h-full">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </AppLayout>
+    );
+  }
 
   // No questions available for current filter
   if (filteredQuestions.length === 0) {
@@ -199,7 +243,7 @@ export default function QuizPage() {
                 </h1>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-2">
               <Filter className="h-4 w-4 text-muted-foreground" />
               <Select value={selectedTopicId} onValueChange={setSelectedTopicId}>
@@ -208,7 +252,7 @@ export default function QuizPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Topics</SelectItem>
-                  {mockTopics.map(topic => (
+                  {topics.map(topic => (
                     <SelectItem key={topic.id} value={topic.id}>{topic.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -251,14 +295,14 @@ export default function QuizPage() {
             className="text-center max-w-md"
           >
             <div className="mb-6 flex justify-center">
-              <ProgressRing 
-                progress={score} 
-                size={120} 
+              <ProgressRing
+                progress={score}
+                size={120}
                 strokeWidth={8}
                 variant={score >= 70 ? 'stable' : score >= 50 ? 'accent' : 'unstable'}
               />
             </div>
-            
+
             <p className="text-sm text-muted-foreground mb-2">{getFilterLabel()}</p>
             <h1 className="font-display text-3xl font-bold text-foreground mb-2">
               {score >= 70 ? 'Great job!' : score >= 50 ? 'Good effort!' : 'Keep practicing!'}
@@ -322,7 +366,7 @@ export default function QuizPage() {
               </p>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <Filter className="h-4 w-4 text-muted-foreground" />
@@ -332,7 +376,7 @@ export default function QuizPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Topics</SelectItem>
-                  {mockTopics.map(topic => (
+                  {topics.map(topic => (
                     <SelectItem key={topic.id} value={topic.id}>{topic.name}</SelectItem>
                   ))}
                 </SelectContent>

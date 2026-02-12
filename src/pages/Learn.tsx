@@ -1,8 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  ChevronLeft, 
-  BookmarkPlus, 
+import {
+  ChevronLeft,
+  BookmarkPlus,
   Highlighter,
   StickyNote,
   Sparkles,
@@ -12,7 +12,8 @@ import {
   Video,
   Play,
   Link as LinkIcon,
-  ExternalLink
+  ExternalLink,
+  Loader2
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -24,7 +25,22 @@ import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { mockQuestions, mockNotes, mockRUs, mockConcepts, mockResources, mockTopics } from "@/lib/mockData";
+import {
+  fetchConcepts,
+  fetchTopics,
+  fetchResources,
+  fetchRUs,
+  fetchNotes,
+  fetchQuestions,
+} from "@/lib/api";
+import type {
+  Concept,
+  Topic,
+  Resource,
+  ReinforcementUnit,
+  Note,
+  Question,
+} from "@/types/study";
 
 const sampleContent = `
 # Chapter 8: Photosynthesis
@@ -62,23 +78,23 @@ function extractVideoId(url: string): { type: 'youtube' | 'vimeo' | 'unknown'; i
     /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
     /youtube\.com\/watch\?.*v=([a-zA-Z0-9_-]{11})/,
   ];
-  
+
   for (const pattern of youtubePatterns) {
     const match = url.match(pattern);
     if (match) return { type: 'youtube', id: match[1] };
   }
-  
+
   // Vimeo pattern
   const vimeoPattern = /vimeo\.com\/(\d+)/;
   const vimeoMatch = url.match(vimeoPattern);
   if (vimeoMatch) return { type: 'vimeo', id: vimeoMatch[1] };
-  
+
   return { type: 'unknown', id: null };
 }
 
 function VideoPlayer({ url }: { url: string }) {
   const { type, id } = extractVideoId(url);
-  
+
   if (type === 'youtube' && id) {
     return (
       <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-muted">
@@ -92,7 +108,7 @@ function VideoPlayer({ url }: { url: string }) {
       </div>
     );
   }
-  
+
   if (type === 'vimeo' && id) {
     return (
       <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-muted">
@@ -106,7 +122,7 @@ function VideoPlayer({ url }: { url: string }) {
       </div>
     );
   }
-  
+
   // Fallback for direct video URLs
   if (url.match(/\.(mp4|webm|ogg)$/i)) {
     return (
@@ -119,7 +135,7 @@ function VideoPlayer({ url }: { url: string }) {
       </div>
     );
   }
-  
+
   return null;
 }
 
@@ -127,7 +143,15 @@ export default function LearnPage() {
   const [searchParams] = useSearchParams();
   const conceptId = searchParams.get('conceptId');
   const topicId = searchParams.get('topicId');
-  
+
+  const [concept, setConcept] = useState<Concept | null>(null);
+  const [topic, setTopic] = useState<Topic | null>(null);
+  const [resources, setResources] = useState<Resource[]>([]);
+  const [relevantRUs, setRelevantRUs] = useState<ReinforcementUnit[]>([]);
+  const [relevantNotes, setRelevantNotes] = useState<Note[]>([]);
+  const [relevantQuestions, setRelevantQuestions] = useState<Question[]>([]);
+  const [loading, setLoading] = useState(true);
+
   const [showPrompt, setShowPrompt] = useState(true);
   const [showNotes, setShowNotes] = useState(true);
   const [readProgress, setReadProgress] = useState(35);
@@ -136,31 +160,81 @@ export default function LearnPage() {
   const [loadedVideoUrl, setLoadedVideoUrl] = useState('');
   const [videoProgress, setVideoProgress] = useState(0);
 
-  // Get the current concept or topic context
-  const concept = useMemo(() => 
-    conceptId ? mockConcepts.find(c => c.id === conceptId) : null,
-    [conceptId]
-  );
-  
-  const topic = useMemo(() => {
-    if (topicId) return mockTopics.find(t => t.id === topicId);
-    if (concept?.topicId) return mockTopics.find(t => t.id === concept.topicId);
-    return null;
-  }, [topicId, concept]);
-  
-  // Get resources for this concept or topic
-  const resources = useMemo(() => {
-    if (conceptId) {
-      return mockResources.filter(r => r.conceptIds.includes(conceptId));
+  // Fetch data based on context
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const [allTopics, allConcepts] = await Promise.all([
+          fetchTopics(),
+          fetchConcepts(),
+        ]);
+        if (cancelled) return;
+
+        let targetConcept: Concept | null = null;
+        let targetTopic: Topic | null = null;
+        let conceptIds: string[] = [];
+
+        if (conceptId) {
+          targetConcept = allConcepts.find(c => c.id === conceptId) ?? null;
+          if (targetConcept?.topicId) {
+            targetTopic = allTopics.find(t => t.id === targetConcept!.topicId) ?? null;
+          }
+          conceptIds = [conceptId];
+        } else if (topicId) {
+          targetTopic = allTopics.find(t => t.id === topicId) ?? null;
+          conceptIds = allConcepts.filter(c => c.topicId === topicId).map(c => c.id);
+        } else {
+          conceptIds = allConcepts.map(c => c.id);
+        }
+
+        setConcept(targetConcept);
+        setTopic(targetTopic);
+
+        // Fetch resources, RUs, notes, questions in parallel
+        const [res, rus, notes, questions] = await Promise.all([
+          conceptId
+            ? fetchResources(undefined, conceptId)
+            : topicId
+              ? fetchResources(topicId)
+              : fetchResources(),
+          conceptId
+            ? fetchRUs(conceptId)
+            : fetchRUs(),
+          conceptId
+            ? fetchNotes(conceptId)
+            : fetchNotes(),
+          conceptId
+            ? fetchQuestions({ conceptId })
+            : topicId
+              ? fetchQuestions({ topicId })
+              : fetchQuestions(),
+        ]);
+        if (cancelled) return;
+
+        setResources(res);
+        // Filter RUs to relevant concepts
+        const filteredRUs = conceptIds.length > 0
+          ? rus.filter(ru => conceptIds.includes(ru.conceptId))
+          : rus;
+        setRelevantRUs(filteredRUs);
+        const filteredNotes = conceptIds.length > 0
+          ? notes.filter(n => conceptIds.includes(n.conceptId))
+          : notes;
+        setRelevantNotes(filteredNotes);
+        setRelevantQuestions(questions);
+      } catch (err) {
+        console.error("Failed to load learn data:", err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
-    if (topicId) {
-      return mockResources.filter(r => r.topicId === topicId);
-    }
-    return mockResources;
+    load();
+    return () => { cancelled = true; };
   }, [conceptId, topicId]);
-  
+
   // Get the first video resource if available
-  const videoResource = useMemo(() => 
+  const videoResource = useMemo(() =>
     resources.find(r => (r.type === 'video' || r.type === 'lecture') && r.url),
     [resources]
   );
@@ -168,21 +242,7 @@ export default function LearnPage() {
   const sessionTitle = concept?.name || topic?.name || 'Study Session';
   const sessionSubtitle = concept ? (topic?.name || 'Learning') : (topicId ? `${resources.length} resources` : 'All Topics');
 
-  // Filter relevant data based on context
-  const relevantConceptIds = conceptId 
-    ? [conceptId] 
-    : topicId 
-      ? mockConcepts.filter(c => c.topicId === topicId).map(c => c.id)
-      : mockConcepts.map(c => c.id);
-  
-  const relevantRUs = mockRUs.filter(ru => relevantConceptIds.includes(ru.conceptId));
-  const relevantNotes = mockNotes.filter(n => relevantConceptIds.includes(n.conceptId));
-  const relevantQuestions = mockQuestions.filter(q => {
-    const ru = mockRUs.find(r => r.id === q.ruId);
-    return ru && relevantConceptIds.includes(ru.conceptId);
-  });
-  
-  const currentQuestion = relevantQuestions[0] || mockQuestions[0];
+  const currentQuestion = relevantQuestions[0] ?? null;
 
   const handleLoadVideo = () => {
     if (videoUrl.trim()) {
@@ -191,6 +251,16 @@ export default function LearnPage() {
   };
 
   const progress = activeTab === 'reading' ? readProgress : videoProgress;
+
+  if (loading) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center h-full">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>
@@ -214,7 +284,7 @@ export default function LearnPage() {
                 </p>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-2">
               {activeTab === 'reading' && (
                 <>
@@ -228,9 +298,9 @@ export default function LearnPage() {
                   </Button>
                 </>
               )}
-              <Button 
-                variant="ghost" 
-                size="sm" 
+              <Button
+                variant="ghost"
+                size="sm"
                 className="gap-1.5"
                 onClick={() => setShowNotes(!showNotes)}
               >
@@ -296,10 +366,10 @@ export default function LearnPage() {
                         return <li key={i} className="ml-4 mb-1 list-decimal">{line.slice(3)}</li>;
                       }
                       if (line.trim() === '') return <br key={i} />;
-                      
+
                       const highlighted = line
                         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-                      
+
                       return <p key={i} className="mb-4" dangerouslySetInnerHTML={{ __html: highlighted }} />;
                     })}
                   </div>
@@ -321,10 +391,10 @@ export default function LearnPage() {
                       Add a Lecture Video
                     </h2>
                     <p className="text-muted-foreground mb-6 max-w-md mx-auto">
-                      Paste a YouTube, Vimeo, or direct video link to start learning. 
+                      Paste a YouTube, Vimeo, or direct video link to start learning.
                       Study Buddy will track your progress and prompt you with questions.
                     </p>
-                    
+
                     <div className="flex gap-2 max-w-lg mx-auto">
                       <div className="relative flex-1">
                         <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -342,7 +412,7 @@ export default function LearnPage() {
                         Load Video
                       </Button>
                     </div>
-                    
+
                     <div className="mt-8 flex items-center justify-center gap-6 text-sm text-muted-foreground">
                       <span className="flex items-center gap-1.5">
                         <span className="h-2 w-2 rounded-full bg-stable" />
@@ -366,15 +436,15 @@ export default function LearnPage() {
                   >
                     {/* Video player */}
                     <VideoPlayer url={loadedVideoUrl} />
-                    
+
                     {/* Video info */}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <ExternalLink className="h-4 w-4" />
                         <span className="truncate max-w-md">{loadedVideoUrl}</span>
                       </div>
-                      <Button 
-                        variant="ghost" 
+                      <Button
+                        variant="ghost"
                         size="sm"
                         onClick={() => {
                           setLoadedVideoUrl('');
@@ -384,7 +454,7 @@ export default function LearnPage() {
                         Change Video
                       </Button>
                     </div>
-                    
+
                     {/* Video controls hint */}
                     <Card className="p-4 bg-muted/30 border-muted">
                       <div className="flex items-start gap-3">
@@ -394,7 +464,7 @@ export default function LearnPage() {
                             Smart Learning Mode Active
                           </p>
                           <p className="text-sm text-muted-foreground">
-                            Study Buddy will pause at key moments to check your understanding. 
+                            Study Buddy will pause at key moments to check your understanding.
                             You can also take notes in the panel on the right.
                           </p>
                         </div>
@@ -500,16 +570,18 @@ export default function LearnPage() {
       </div>
 
       {/* Reinforcement prompt */}
-      <ReinforcementPrompt
-        question={currentQuestion}
-        isVisible={showPrompt}
-        onAnswer={(answer, isCorrect) => {
-          console.log('Answered:', answer, isCorrect);
-          setShowPrompt(false);
-        }}
-        onSkip={() => setShowPrompt(false)}
-        onClose={() => setShowPrompt(false)}
-      />
+      {currentQuestion && (
+        <ReinforcementPrompt
+          question={currentQuestion}
+          isVisible={showPrompt}
+          onAnswer={(answer, isCorrect) => {
+            console.log('Answered:', answer, isCorrect);
+            setShowPrompt(false);
+          }}
+          onSkip={() => setShowPrompt(false)}
+          onClose={() => setShowPrompt(false)}
+        />
+      )}
     </AppLayout>
   );
 }

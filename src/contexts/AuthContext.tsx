@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
+import { apiGet, apiPost } from "@/lib/api";
 
 export interface User {
   id: string;
@@ -13,64 +14,62 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string, displayName: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-const MOCK_USERS: Record<string, { password: string; user: User }> = {
-  "demo@studybuddy.app": {
-    password: "demo1234",
-    user: {
-      id: "usr_1",
-      email: "demo@studybuddy.app",
-      displayName: "Alex Chen",
-      createdAt: new Date("2025-09-01"),
-    },
-  },
-};
+interface UserDTO {
+  id: string;
+  email: string;
+  displayName: string;
+  avatar?: string;
+  createdAt: string;
+}
+
+interface AuthDTO {
+  user: UserDTO;
+  accessToken: string;
+}
+
+function toUser(dto: UserDTO): User {
+  return { ...dto, createdAt: new Date(dto.createdAt) };
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => {
-    const stored = localStorage.getItem("sb_user");
-    return stored ? JSON.parse(stored) : null;
-  });
-  const [isLoading, setIsLoading] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Restore session from cookie on mount
+  useEffect(() => {
+    apiGet<UserDTO>("/api/auth/me")
+      .then((dto) => setUser(toUser(dto)))
+      .catch(() => setUser(null))
+      .finally(() => setIsLoading(false));
+  }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 800));
-    const entry = MOCK_USERS[email];
-    if (!entry || entry.password !== password) {
+    try {
+      const data = await apiPost<AuthDTO>("/api/auth/login", { email, password });
+      setUser(toUser(data.user));
+    } finally {
       setIsLoading(false);
-      throw new Error("Invalid email or password");
     }
-    localStorage.setItem("sb_user", JSON.stringify(entry.user));
-    setUser(entry.user);
-    setIsLoading(false);
   }, []);
 
   const signup = useCallback(async (email: string, password: string, displayName: string) => {
     setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 800));
-    if (MOCK_USERS[email]) {
+    try {
+      const data = await apiPost<AuthDTO>("/api/auth/signup", { email, password, displayName });
+      setUser(toUser(data.user));
+    } finally {
       setIsLoading(false);
-      throw new Error("Email already in use");
     }
-    const newUser: User = {
-      id: `usr_${Date.now()}`,
-      email,
-      displayName,
-      createdAt: new Date(),
-    };
-    MOCK_USERS[email] = { password, user: newUser };
-    localStorage.setItem("sb_user", JSON.stringify(newUser));
-    setUser(newUser);
-    setIsLoading(false);
   }, []);
 
-  const logout = useCallback(() => {
-    localStorage.removeItem("sb_user");
+  const logout = useCallback(async () => {
+    await apiPost("/api/auth/logout");
     setUser(null);
   }, []);
 

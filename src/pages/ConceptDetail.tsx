@@ -1,18 +1,19 @@
-import { useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { 
-  ArrowLeft, 
-  BookOpen, 
-  CheckCircle2, 
-  AlertCircle, 
-  Sparkles, 
+import {
+  ArrowLeft,
+  BookOpen,
+  CheckCircle2,
+  AlertCircle,
+  Sparkles,
   FileText,
   Video,
   ExternalLink,
   Clock,
   TrendingUp,
-  GraduationCap
+  GraduationCap,
+  Loader2
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,8 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ProgressRing } from "@/components/ui/progress-ring";
 import { StateBadge } from "@/components/ui/state-badge";
-import { mockConcepts, mockRUs, mockTopics, mockResources } from "@/lib/mockData";
+import { fetchConcept, fetchTopics, fetchResources } from "@/lib/api";
+import type { Concept, Topic, Resource, ReinforcementUnit } from "@/types/study";
 import { cn } from "@/lib/utils";
 
 const container = {
@@ -36,13 +38,13 @@ const item = {
   show: { opacity: 1, y: 0 }
 };
 
-function getConceptStatus(rus: typeof mockRUs) {
+function getConceptStatus(rus: ReinforcementUnit[]) {
   if (rus.length === 0) return { status: 'empty' as const, progress: 0 };
-  
+
   const stableCount = rus.filter(ru => ru.state === 'stable').length;
   const unstableCount = rus.filter(ru => ru.state === 'unstable').length;
   const progress = (stableCount / rus.length) * 100;
-  
+
   if (unstableCount > 0) return { status: 'needs-attention' as const, progress };
   if (stableCount === rus.length) return { status: 'mastered' as const, progress };
   return { status: 'in-progress' as const, progress };
@@ -60,37 +62,44 @@ export default function ConceptDetail() {
   const { conceptId } = useParams<{ conceptId: string }>();
   const navigate = useNavigate();
 
-  const concept = useMemo(() => 
-    mockConcepts.find(c => c.id === conceptId),
-    [conceptId]
-  );
+  const [concept, setConcept] = useState<Concept | null>(null);
+  const [topic, setTopic] = useState<Topic | null>(null);
+  const [resources, setResources] = useState<Resource[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const reinforcementUnits = useMemo(() => 
-    mockRUs.filter(ru => ru.conceptId === conceptId),
-    [conceptId]
-  );
+  useEffect(() => {
+    if (!conceptId) return;
+    let cancelled = false;
+    async function load() {
+      try {
+        const [c, allTopics, res] = await Promise.all([
+          fetchConcept(conceptId!),
+          fetchTopics(),
+          fetchResources(undefined, conceptId),
+        ]);
+        if (cancelled) return;
+        setConcept(c);
+        setTopic(c.topicId ? allTopics.find(t => t.id === c.topicId) ?? null : null);
+        setResources(res);
+      } catch (err) {
+        console.error("Failed to load concept:", err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [conceptId]);
 
-  const topic = useMemo(() => 
-    concept?.topicId ? mockTopics.find(t => t.id === concept.topicId) : null,
-    [concept]
-  );
-
-  const resources = useMemo(() => 
-    mockResources.filter(r => r.conceptIds.includes(conceptId || '')),
-    [conceptId]
-  );
-
-  const { status, progress } = getConceptStatus(reinforcementUnits);
-
-  const statusConfig = {
-    'empty': { icon: BookOpen, label: 'Not started', variant: 'default' as const },
-    'needs-attention': { icon: AlertCircle, label: 'Needs review', variant: 'unstable' as const },
-    'in-progress': { icon: Sparkles, label: 'Learning', variant: 'accent' as const },
-    'mastered': { icon: CheckCircle2, label: 'Mastered', variant: 'stable' as const },
-  };
-
-  const config = statusConfig[status];
-  const StatusIcon = config.icon;
+  if (loading) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center h-full">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </AppLayout>
+    );
+  }
 
   if (!concept) {
     return (
@@ -106,18 +115,31 @@ export default function ConceptDetail() {
     );
   }
 
+  const reinforcementUnits = concept.reinforcementUnits;
+  const { status, progress } = getConceptStatus(reinforcementUnits);
+
+  const statusConfig = {
+    'empty': { icon: BookOpen, label: 'Not started', variant: 'default' as const },
+    'needs-attention': { icon: AlertCircle, label: 'Needs review', variant: 'unstable' as const },
+    'in-progress': { icon: Sparkles, label: 'Learning', variant: 'accent' as const },
+    'mastered': { icon: CheckCircle2, label: 'Mastered', variant: 'stable' as const },
+  };
+
+  const config = statusConfig[status];
+  const StatusIcon = config.icon;
+
   return (
     <AppLayout>
       <div className="p-8 max-w-4xl mx-auto">
         {/* Back button and breadcrumb */}
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           className="mb-6"
         >
-          <Button 
-            variant="ghost" 
-            size="sm" 
+          <Button
+            variant="ghost"
+            size="sm"
             className="gap-2 -ml-2 text-muted-foreground hover:text-foreground"
             onClick={() => navigate('/')}
           >
@@ -127,30 +149,30 @@ export default function ConceptDetail() {
         </motion.div>
 
         {/* Header */}
-        <motion.header 
+        <motion.header
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="mb-8"
         >
           <div className="flex items-start gap-5">
-            <ProgressRing 
-              progress={progress} 
-              size={72} 
-              strokeWidth={6} 
+            <ProgressRing
+              progress={progress}
+              size={72}
+              strokeWidth={6}
               variant={config.variant}
               showPercentage={reinforcementUnits.length > 0}
             />
-            
+
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-2">
-                <StatusIcon 
+                <StatusIcon
                   className={cn(
                     "h-4 w-4",
                     status === 'needs-attention' && "text-unstable",
                     status === 'mastered' && "text-stable",
                     status === 'in-progress' && "text-accent",
                     status === 'empty' && "text-muted-foreground"
-                  )} 
+                  )}
                 />
                 <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                   {config.label}
@@ -164,11 +186,11 @@ export default function ConceptDetail() {
                   </>
                 )}
               </div>
-              
+
               <h1 className="font-display text-3xl font-bold text-foreground tracking-tight mb-2">
                 {concept.name}
               </h1>
-              
+
               <p className="text-muted-foreground">
                 {concept.description}
               </p>
@@ -177,7 +199,7 @@ export default function ConceptDetail() {
         </motion.header>
 
         {/* Stats row */}
-        <motion.div 
+        <motion.div
           variants={container}
           initial="hidden"
           animate="show"
@@ -196,7 +218,7 @@ export default function ConceptDetail() {
               </div>
             </Card>
           </motion.div>
-          
+
           <motion.div variants={item}>
             <Card className="p-4 bg-card border-border/50">
               <div className="flex items-center gap-3">
@@ -212,7 +234,7 @@ export default function ConceptDetail() {
               </div>
             </Card>
           </motion.div>
-          
+
           <motion.div variants={item}>
             <Card className="p-4 bg-card border-border/50">
               <div className="flex items-center gap-3">
@@ -242,7 +264,7 @@ export default function ConceptDetail() {
                 Knowledge Units
               </h2>
             </div>
-            
+
             <div className="space-y-3">
               {reinforcementUnits.length === 0 ? (
                 <Card className="p-6 bg-card border-border/50 text-center">
@@ -301,7 +323,7 @@ export default function ConceptDetail() {
                 Study Resources
               </h2>
             </div>
-            
+
             <div className="space-y-3">
               {resources.length === 0 ? (
                 <Card className="p-6 bg-card border-border/50 text-center">
@@ -319,7 +341,7 @@ export default function ConceptDetail() {
                         <div className="flex items-start gap-3">
                           <div className={cn(
                             "flex-shrink-0 p-2 rounded-lg",
-                            resource.type === 'video' || resource.type === 'lecture' 
+                            resource.type === 'video' || resource.type === 'lecture'
                               ? "bg-accent/10 text-accent"
                               : "bg-primary/10 text-primary"
                           )}>
@@ -344,7 +366,7 @@ export default function ConceptDetail() {
                   );
                 })
               )}
-              
+
               <Button variant="outline" className="w-full mt-2">
                 Add Resource
               </Button>
@@ -353,21 +375,21 @@ export default function ConceptDetail() {
         </div>
 
         {/* Action buttons */}
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
           className="mt-8 flex gap-3"
         >
-          <Button 
+          <Button
             className="flex-1"
             onClick={() => navigate(`/learn?conceptId=${conceptId}`)}
           >
             <Sparkles className="h-4 w-4 mr-2" />
             Start Learning
           </Button>
-          <Button 
-            variant="secondary" 
+          <Button
+            variant="secondary"
             className="flex-1"
             onClick={() => navigate(`/quiz?conceptId=${conceptId}`)}
           >

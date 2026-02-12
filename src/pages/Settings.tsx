@@ -1,24 +1,72 @@
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
-import { 
-  User, 
-  Bell, 
-  Moon, 
-  Clock, 
+import {
+  User,
+  Bell,
+  Moon,
   BookOpen,
   Target,
-  Zap
+  Loader2
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
+import { useAuth } from "@/contexts/AuthContext";
+import { fetchSettings, updateSettings, type Settings } from "@/lib/api";
 
 export default function SettingsPage() {
+  const { user } = useAuth();
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchSettings()
+      .then(setSettings)
+      .catch((err) => console.error("Failed to load settings:", err))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const patch = useCallback(async (update: Partial<Settings>) => {
+    setSettings((prev) => (prev ? { ...prev, ...update } : prev));
+    try {
+      await updateSettings(update);
+    } catch (err) {
+      console.error("Failed to save settings:", err);
+    }
+  }, []);
+
+  if (loading) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center h-full">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </AppLayout>
+    );
+  }
+
+  const initials = user?.displayName
+    ? user.displayName
+        .split(" ")
+        .map((w) => w[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2)
+    : "??";
+
+  const frequencyLabel = (v: number) => {
+    if (v <= 25) return "Low";
+    if (v <= 50) return "Medium";
+    if (v <= 75) return "High";
+    return "Maximum";
+  };
+
   return (
     <AppLayout>
       <div className="p-8 max-w-2xl mx-auto">
-        <motion.header 
+        <motion.header
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="mb-8"
@@ -40,11 +88,11 @@ export default function SettingsPage() {
             </div>
             <div className="flex items-center gap-4">
               <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center">
-                <span className="font-display text-xl font-bold text-primary">SB</span>
+                <span className="font-display text-xl font-bold text-primary">{initials}</span>
               </div>
               <div>
-                <p className="font-medium text-foreground">Study Buddy User</p>
-                <p className="text-sm text-muted-foreground">student@example.com</p>
+                <p className="font-medium text-foreground">{user?.displayName ?? "Unknown"}</p>
+                <p className="text-sm text-muted-foreground">{user?.email ?? ""}</p>
               </div>
             </div>
           </Card>
@@ -55,7 +103,7 @@ export default function SettingsPage() {
               <BookOpen className="h-5 w-5 text-muted-foreground" />
               <h2 className="font-display font-semibold text-foreground">Learning Preferences</h2>
             </div>
-            
+
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
@@ -64,15 +112,25 @@ export default function SettingsPage() {
                     Show quick check questions during reading
                   </p>
                 </div>
-                <Switch defaultChecked />
+                <Switch
+                  checked={settings?.reinforcementPrompts ?? true}
+                  onCheckedChange={(v) => patch({ reinforcementPrompts: v })}
+                />
               </div>
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label className="text-foreground">Question Frequency</Label>
-                  <span className="text-sm text-muted-foreground">Medium</span>
+                  <span className="text-sm text-muted-foreground">
+                    {frequencyLabel(settings?.questionFrequency ?? 50)}
+                  </span>
                 </div>
-                <Slider defaultValue={[50]} max={100} step={25} />
+                <Slider
+                  value={[settings?.questionFrequency ?? 50]}
+                  onValueCommit={([v]) => patch({ questionFrequency: v })}
+                  max={100}
+                  step={25}
+                />
                 <div className="flex justify-between text-xs text-muted-foreground">
                   <span>Fewer</span>
                   <span>More</span>
@@ -86,7 +144,10 @@ export default function SettingsPage() {
                     Automatically create study notes
                   </p>
                 </div>
-                <Switch defaultChecked />
+                <Switch
+                  checked={settings?.aiGeneratedNotes ?? true}
+                  onCheckedChange={(v) => patch({ aiGeneratedNotes: v })}
+                />
               </div>
             </div>
           </Card>
@@ -97,22 +158,36 @@ export default function SettingsPage() {
               <Target className="h-5 w-5 text-muted-foreground" />
               <h2 className="font-display font-semibold text-foreground">Daily Goals</h2>
             </div>
-            
+
             <div className="space-y-6">
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label className="text-foreground">Study Time Goal</Label>
-                  <span className="text-sm text-muted-foreground">30 minutes</span>
+                  <span className="text-sm text-muted-foreground">
+                    {settings?.studyTimeGoal ?? 30} minutes
+                  </span>
                 </div>
-                <Slider defaultValue={[30]} max={120} step={15} />
+                <Slider
+                  value={[settings?.studyTimeGoal ?? 30]}
+                  onValueCommit={([v]) => patch({ studyTimeGoal: v })}
+                  max={120}
+                  step={15}
+                />
               </div>
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label className="text-foreground">Daily Questions</Label>
-                  <span className="text-sm text-muted-foreground">10 questions</span>
+                  <span className="text-sm text-muted-foreground">
+                    {settings?.dailyQuestions ?? 10} questions
+                  </span>
                 </div>
-                <Slider defaultValue={[10]} max={50} step={5} />
+                <Slider
+                  value={[settings?.dailyQuestions ?? 10]}
+                  onValueCommit={([v]) => patch({ dailyQuestions: v })}
+                  max={50}
+                  step={5}
+                />
               </div>
             </div>
           </Card>
@@ -123,7 +198,7 @@ export default function SettingsPage() {
               <Bell className="h-5 w-5 text-muted-foreground" />
               <h2 className="font-display font-semibold text-foreground">Notifications</h2>
             </div>
-            
+
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -132,7 +207,10 @@ export default function SettingsPage() {
                     Get reminded to study
                   </p>
                 </div>
-                <Switch defaultChecked />
+                <Switch
+                  checked={settings?.dailyReminders ?? true}
+                  onCheckedChange={(v) => patch({ dailyReminders: v })}
+                />
               </div>
 
               <div className="flex items-center justify-between">
@@ -142,7 +220,10 @@ export default function SettingsPage() {
                     Don't lose your streak!
                   </p>
                 </div>
-                <Switch defaultChecked />
+                <Switch
+                  checked={settings?.streakAlerts ?? true}
+                  onCheckedChange={(v) => patch({ streakAlerts: v })}
+                />
               </div>
 
               <div className="flex items-center justify-between">
@@ -152,7 +233,10 @@ export default function SettingsPage() {
                     When concepts need reinforcement
                   </p>
                 </div>
-                <Switch />
+                <Switch
+                  checked={settings?.reviewReminders ?? false}
+                  onCheckedChange={(v) => patch({ reviewReminders: v })}
+                />
               </div>
             </div>
           </Card>
@@ -163,7 +247,7 @@ export default function SettingsPage() {
               <Moon className="h-5 w-5 text-muted-foreground" />
               <h2 className="font-display font-semibold text-foreground">Appearance</h2>
             </div>
-            
+
             <div className="flex items-center justify-between">
               <div>
                 <Label className="text-foreground">Reduce Animations</Label>
@@ -171,7 +255,10 @@ export default function SettingsPage() {
                   For accessibility
                 </p>
               </div>
-              <Switch />
+              <Switch
+                checked={settings?.reduceAnimations ?? false}
+                onCheckedChange={(v) => patch({ reduceAnimations: v })}
+              />
             </div>
           </Card>
         </div>

@@ -1,9 +1,9 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { 
-  DndContext, 
-  DragEndEvent, 
+import {
+  DndContext,
+  DragEndEvent,
   DragOverlay,
   DragStartEvent,
   PointerSensor,
@@ -13,17 +13,18 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { useDroppable } from "@dnd-kit/core";
-import { 
-  BookOpen, 
-  CheckCircle2, 
-  AlertTriangle, 
-  Clock, 
+import {
+  BookOpen,
+  CheckCircle2,
+  AlertTriangle,
+  Clock,
   Flame,
   TrendingUp,
   Plus,
   FileQuestion,
   Sparkles,
-  ArrowRight
+  ArrowRight,
+  Loader2
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { DraggableConceptCard } from "@/components/draggable-concept-card";
@@ -32,8 +33,27 @@ import { SessionCard } from "@/components/session-card";
 import { StatsCard } from "@/components/stats-card";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { mockConcepts, mockRUs, mockSessions, mockProgress, mockTopics, mockResources } from "@/lib/mockData";
-import { Concept, ReinforcementUnit, Topic, Resource } from "@/types/study";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  fetchTopics,
+  fetchConcepts,
+  fetchResources,
+  fetchSessions,
+  fetchProgress,
+  apiPatch,
+  apiDelete,
+  createTopic,
+} from "@/lib/api";
+import { Concept, ReinforcementUnit, Topic, Resource, StudySession, LearnerProgress } from "@/types/study";
 import { cn } from "@/lib/utils";
 
 const container = {
@@ -46,33 +66,33 @@ const container = {
 
 const item = {
   hidden: { opacity: 0, y: 20 },
-  show: { 
-    opacity: 1, 
+  show: {
+    opacity: 1,
     y: 0,
     transition: { type: "spring" as const, stiffness: 300, damping: 24 }
   }
 };
 
 // Uncategorized drop zone component
-function UncategorizedDropZone({ 
-  concepts, 
+function UncategorizedDropZone({
+  concepts,
   onDeleteConcept,
   onConceptClick,
-  isOver 
-}: { 
+  isOver
+}: {
   concepts: (Concept & { reinforcementUnits: ReinforcementUnit[] })[];
   onDeleteConcept: (id: string) => void;
   onConceptClick: (id: string) => void;
   isOver: boolean;
 }) {
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       className={cn(
         "mt-6 p-5 rounded-2xl border-2 border-dashed transition-all duration-300",
-        isOver 
-          ? "border-primary/50 bg-primary/5 scale-[1.01]" 
+        isOver
+          ? "border-primary/50 bg-primary/5 scale-[1.01]"
           : "border-border/70 bg-muted/20"
       )}
     >
@@ -90,9 +110,9 @@ function UncategorizedDropZone({
           Uncategorized
         </h3>
       </div>
-      
-      <SortableContext 
-        items={concepts.map(c => c.id)} 
+
+      <SortableContext
+        items={concepts.map(c => c.id)}
         strategy={verticalListSortingStrategy}
       >
         <div className="space-y-3">
@@ -109,7 +129,7 @@ function UncategorizedDropZone({
           ))}
         </div>
       </SortableContext>
-      
+
       {concepts.length === 0 && (
         <div className="text-center py-8">
           <p className="text-sm text-muted-foreground">
@@ -123,11 +143,18 @@ function UncategorizedDropZone({
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [topics, setTopics] = useState<Topic[]>(mockTopics);
-  const [concepts, setConcepts] = useState<Concept[]>(mockConcepts);
-  const [resources] = useState<Resource[]>(mockResources);
+  const [topics, setTopics] = useState<Topic[]>([]);
+  const [concepts, setConcepts] = useState<Concept[]>([]);
+  const [resources, setResources] = useState<Resource[]>([]);
+  const [sessions, setSessions] = useState<StudySession[]>([]);
+  const [progress, setProgress] = useState<LearnerProgress | null>(null);
+  const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
-  
+  const [addTopicOpen, setAddTopicOpen] = useState(false);
+  const [newTopicName, setNewTopicName] = useState("");
+  const [newTopicDesc, setNewTopicDesc] = useState("");
+  const [creatingTopic, setCreatingTopic] = useState(false);
+
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -136,41 +163,60 @@ export default function Dashboard() {
     })
   );
 
+  // Fetch all dashboard data on mount
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const [t, c, r, s, p] = await Promise.all([
+          fetchTopics(),
+          fetchConcepts(),
+          fetchResources(),
+          fetchSessions(),
+          fetchProgress(),
+        ]);
+        if (cancelled) return;
+        setTopics(t);
+        setConcepts(c);
+        setResources(r);
+        setSessions(s);
+        setProgress(p);
+      } catch (err) {
+        console.error("Failed to load dashboard data:", err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
   // Droppable for uncategorized
   const { setNodeRef: setUncategorizedRef, isOver: isOverUncategorized } = useDroppable({
     id: 'uncategorized',
     data: { type: 'uncategorized' }
   });
 
-  // Enrich concepts with their RUs
-  const enrichedConcepts = useMemo(() => 
-    concepts.map(concept => ({
-      ...concept,
-      reinforcementUnits: mockRUs.filter(ru => ru.conceptId === concept.id)
-    })),
-    [concepts]
-  );
-
   // Group concepts by topic with resources
-  const conceptsByTopic = useMemo(() => 
+  const conceptsByTopic = useMemo(() =>
     topics.map(topic => ({
       topic,
-      concepts: enrichedConcepts.filter(c => c.topicId === topic.id),
+      concepts: concepts.filter(c => c.topicId === topic.id),
       resources: resources.filter(r => r.topicId === topic.id)
     })),
-    [topics, enrichedConcepts, resources]
+    [topics, concepts, resources]
   );
 
   // Get uncategorized concepts
-  const uncategorizedConcepts = useMemo(() => 
-    enrichedConcepts.filter(c => !c.topicId),
-    [enrichedConcepts]
+  const uncategorizedConcepts = useMemo(() =>
+    concepts.filter(c => !c.topicId),
+    [concepts]
   );
 
   // Get the active concept for drag overlay
-  const activeConcept = useMemo(() => 
-    activeId ? enrichedConcepts.find(c => c.id === activeId) : null,
-    [activeId, enrichedConcepts]
+  const activeConcept = useMemo(() =>
+    activeId ? concepts.find(c => c.id === activeId) : null,
+    [activeId, concepts]
   );
 
   const formatStudyTime = (minutes: number) => {
@@ -182,7 +228,7 @@ export default function Dashboard() {
     setActiveId(event.active.id as string);
   };
 
-  const handleDragEnd = (event: DragEndEvent) => {
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     const { active, over } = event;
     setActiveId(null);
 
@@ -204,37 +250,83 @@ export default function Dashboard() {
       targetTopicId = targetConcept?.topicId ?? null;
     }
 
-    // Update concept's topic
-    setConcepts(prev => 
-      prev.map(c => 
-        c.id === conceptId 
+    // Optimistic update
+    setConcepts(prev =>
+      prev.map(c =>
+        c.id === conceptId
           ? { ...c, topicId: targetTopicId }
           : c
       )
     );
-  };
 
-  const handleDeleteConcept = (conceptId: string) => {
+    // Persist to backend
+    try {
+      await apiPatch(`/api/concepts/${conceptId}`, { topicId: targetTopicId });
+    } catch (err) {
+      console.error("Failed to update concept topic:", err);
+    }
+  }, [concepts]);
+
+  const handleDeleteConcept = useCallback(async (conceptId: string) => {
     setConcepts(prev => prev.filter(c => c.id !== conceptId));
-  };
+    try {
+      await apiDelete(`/api/concepts/${conceptId}`);
+    } catch (err) {
+      console.error("Failed to delete concept:", err);
+    }
+  }, []);
 
-  const handleDeleteTopic = (topicId: string) => {
+  const handleDeleteTopic = useCallback(async (topicId: string) => {
     // Move all concepts from this topic to uncategorized
-    setConcepts(prev => 
-      prev.map(c => 
-        c.topicId === topicId 
+    setConcepts(prev =>
+      prev.map(c =>
+        c.topicId === topicId
           ? { ...c, topicId: null }
           : c
       )
     );
     setTopics(prev => prev.filter(t => t.id !== topicId));
-  };
+    try {
+      await apiDelete(`/api/topics/${topicId}`);
+    } catch (err) {
+      console.error("Failed to delete topic:", err);
+    }
+  }, []);
+
+  const handleCreateTopic = useCallback(async () => {
+    if (!newTopicName.trim()) return;
+    setCreatingTopic(true);
+    try {
+      const topic = await createTopic({
+        name: newTopicName.trim(),
+        description: newTopicDesc.trim() || undefined,
+      });
+      setTopics(prev => [...prev, topic]);
+      setAddTopicOpen(false);
+      setNewTopicName("");
+      setNewTopicDesc("");
+    } catch (err) {
+      console.error("Failed to create topic:", err);
+    } finally {
+      setCreatingTopic(false);
+    }
+  }, [newTopicName, newTopicDesc]);
+
+  if (loading) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center h-full">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>
       <div className="p-8 max-w-7xl mx-auto">
         {/* Header */}
-        <motion.header 
+        <motion.header
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ type: "spring", stiffness: 300, damping: 24 }}
@@ -263,7 +355,11 @@ export default function Dashboard() {
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.2 }}
             >
-              <Button size="lg" className="gap-2 shadow-md hover:shadow-lg transition-shadow">
+              <Button
+                size="lg"
+                className="gap-2 shadow-md hover:shadow-lg transition-shadow"
+                onClick={() => navigate("/learn")}
+              >
                 Start Session
                 <ArrowRight className="h-4 w-4" />
               </Button>
@@ -272,7 +368,7 @@ export default function Dashboard() {
         </motion.header>
 
         {/* Stats Grid */}
-        <motion.div 
+        <motion.div
           variants={container}
           initial="hidden"
           animate="show"
@@ -281,41 +377,39 @@ export default function Dashboard() {
           <motion.div variants={item}>
             <StatsCard
               title="Study Streak"
-              value={mockProgress.streakDays}
+              value={progress?.streakDays ?? 0}
               subtitle="days in a row"
               icon={Flame}
               variant="accent"
-              trend={{ value: 14, isPositive: true }}
             />
           </motion.div>
-          
+
           <motion.div variants={item}>
             <StatsCard
               title="Concepts Mastered"
-              value={mockProgress.stableConcepts}
-              subtitle={`of ${mockProgress.totalConcepts} total`}
+              value={progress?.stableConcepts ?? 0}
+              subtitle={`of ${progress?.totalConcepts ?? 0} total`}
               icon={CheckCircle2}
               variant="stable"
             />
           </motion.div>
-          
+
           <motion.div variants={item}>
             <StatsCard
               title="Needs Review"
-              value={mockProgress.needsReinforcement}
+              value={progress?.needsReinforcement ?? 0}
               subtitle="concepts to reinforce"
               icon={AlertTriangle}
               variant="unstable"
             />
           </motion.div>
-          
+
           <motion.div variants={item}>
             <StatsCard
               title="Study Time"
-              value={formatStudyTime(mockProgress.totalStudyTime)}
+              value={formatStudyTime(progress?.totalStudyTime ?? 0)}
               subtitle="this week"
               icon={Clock}
-              trend={{ value: 23, isPositive: true }}
             />
           </motion.div>
         </motion.div>
@@ -323,7 +417,7 @@ export default function Dashboard() {
         {/* Two column layout */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Topics & Concepts column */}
-          <motion.section 
+          <motion.section
             variants={container}
             initial="hidden"
             animate="show"
@@ -341,13 +435,18 @@ export default function Dashboard() {
                   <p className="text-sm text-muted-foreground">{topics.length} topics · {concepts.length} concepts</p>
                 </div>
               </div>
-              <Button variant="outline" size="sm" className="gap-2 shadow-sm hover:shadow transition-shadow">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 shadow-sm hover:shadow transition-shadow"
+                onClick={() => setAddTopicOpen(true)}
+              >
                 <Plus className="h-4 w-4" />
                 Add Topic
               </Button>
             </div>
-            
-            <DndContext 
+
+            <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
               onDragStart={handleDragStart}
@@ -357,12 +456,12 @@ export default function Dashboard() {
                 {/* Topics with their concepts */}
                 {conceptsByTopic.map(({ topic, concepts, resources: topicResources }) => (
                   <motion.div key={topic.id} variants={item}>
-                    <DroppableTopicCard 
-                      topic={topic} 
+                    <DroppableTopicCard
+                      topic={topic}
                       concepts={concepts}
                       resources={topicResources}
-                      defaultExpanded={concepts.some(c => 
-                        c.reinforcementUnits.some(ru => 
+                      defaultExpanded={concepts.some(c =>
+                        c.reinforcementUnits.some(ru =>
                           ru.state === 'unstable' || ru.state === 'introduced'
                         )
                       )}
@@ -371,10 +470,10 @@ export default function Dashboard() {
                     />
                   </motion.div>
                 ))}
-                
+
                 {/* Uncategorized concepts */}
                 <motion.div variants={item} ref={setUncategorizedRef}>
-                  <UncategorizedDropZone 
+                  <UncategorizedDropZone
                     concepts={uncategorizedConcepts}
                     onDeleteConcept={handleDeleteConcept}
                     onConceptClick={(id) => navigate(`/concept/${id}`)}
@@ -414,28 +513,90 @@ export default function Dashboard() {
                 </div>
               </div>
             </div>
-            
+
             <div className="space-y-3">
-              {mockSessions.map((session, index) => (
-                <motion.div 
-                  key={session.id} 
-                  variants={item}
-                  custom={index}
-                >
-                  <SessionCard session={session} />
-                </motion.div>
-              ))}
+              {sessions.length === 0 ? (
+                <Card className="p-6 text-center">
+                  <p className="text-sm text-muted-foreground">No sessions yet. Start learning!</p>
+                </Card>
+              ) : (
+                sessions.map((session, index) => (
+                  <motion.div
+                    key={session.id}
+                    variants={item}
+                    custom={index}
+                  >
+                    <SessionCard session={session} />
+                  </motion.div>
+                ))
+              )}
             </div>
-            
-            <motion.div variants={item} className="mt-5">
-              <Button variant="outline" className="w-full gap-2 shadow-sm hover:shadow transition-shadow">
-                View All Sessions
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </motion.div>
+
+            {sessions.length > 0 && (
+              <motion.div variants={item} className="mt-5">
+                <Button
+                  variant="outline"
+                  className="w-full gap-2 shadow-sm hover:shadow transition-shadow"
+                  onClick={() => navigate("/learn")}
+                >
+                  Start New Session
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </motion.div>
+            )}
           </motion.section>
         </div>
       </div>
+
+      {/* Add Topic Dialog */}
+      <Dialog open={addTopicOpen} onOpenChange={setAddTopicOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create a new topic</DialogTitle>
+            <DialogDescription>
+              Topics help you organize related concepts together.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="topic-name">Name</Label>
+              <Input
+                id="topic-name"
+                placeholder="e.g. Organic Chemistry"
+                value={newTopicName}
+                onChange={(e) => setNewTopicName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleCreateTopic()}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="topic-desc">Description (optional)</Label>
+              <Input
+                id="topic-desc"
+                placeholder="What does this topic cover?"
+                value={newTopicDesc}
+                onChange={(e) => setNewTopicDesc(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleCreateTopic()}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddTopicOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateTopic}
+              disabled={!newTopicName.trim() || creatingTopic}
+            >
+              {creatingTopic ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Plus className="h-4 w-4 mr-2" />
+              )}
+              Create Topic
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

@@ -138,11 +138,6 @@ export default function Auth() {
             </Button>
           </form>
 
-          {mode === "login" && (
-            <p className="mt-4 text-center text-xs text-muted-foreground">
-              Demo: <span className="font-medium text-foreground/70">demo@studybuddy.app</span> / <span className="font-medium text-foreground/70">demo1234</span>
-            </p>
-          )}
         </div>
       </motion.div>
     </div>
