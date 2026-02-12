@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE study_sessions SET progress = 100, completed_at = now()\n            WHERE id = $1 AND user_id = $2 AND completed_at IS NULL\n            RETURNING id, user_id, title, session_type::TEXT AS session_type,\n                      progress, started_at, completed_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "session_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "progress",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "ae3d2a88187d6ddbe2252487fa8c0a416162f2239312b95f5373e3de332a3eac"
+}

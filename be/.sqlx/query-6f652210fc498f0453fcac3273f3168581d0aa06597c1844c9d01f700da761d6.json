@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT user_id, reinforcement_prompts, question_frequency, ai_generated_notes,\n                   study_time_goal, daily_questions, daily_reminders, streak_alerts,\n                   review_reminders, reduce_animations\n            FROM user_settings WHERE user_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "reinforcement_prompts",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "question_frequency",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "ai_generated_notes",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "study_time_goal",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "daily_questions",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "daily_reminders",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "streak_alerts",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "review_reminders",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "reduce_animations",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6f652210fc498f0453fcac3273f3168581d0aa06597c1844c9d01f700da761d6"
+}

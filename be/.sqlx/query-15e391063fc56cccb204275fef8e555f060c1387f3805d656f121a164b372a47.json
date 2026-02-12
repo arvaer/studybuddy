@@ -1,0 +1,94 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                ru.id,\n                ru.concept_id,\n                ru.claim,\n                ru.context,\n                ru.state::TEXT AS state,\n                ru.stability_score,\n                ru.reinforcement_count,\n                ru.last_reinforced,\n                ru.ease_factor,\n                ru.interval_days,\n                ru.due_at,\n                ru.created_at,\n                COALESCE(\n                    array_agg(rd.depends_on_id) FILTER (WHERE rd.depends_on_id IS NOT NULL),\n                    '{}'\n                ) AS \"dependencies!\"\n            FROM reinforcement_units ru\n            LEFT JOIN ru_dependencies rd ON rd.ru_id = ru.id\n            WHERE ru.concept_id = $1\n            GROUP BY ru.id\n            ORDER BY ru.created_at ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "concept_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "claim",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "context",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "stability_score",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 6,
+        "name": "reinforcement_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "last_reinforced",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "ease_factor",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 9,
+        "name": "interval_days",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "due_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "dependencies!",
+        "type_info": "UuidArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "15e391063fc56cccb204275fef8e555f060c1387f3805d656f121a164b372a47"
+}

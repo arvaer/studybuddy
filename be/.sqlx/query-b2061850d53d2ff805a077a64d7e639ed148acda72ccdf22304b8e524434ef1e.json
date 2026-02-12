@@ -1,0 +1,61 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT DISTINCT r.id, r.user_id, r.topic_id, r.title,\n                   r.resource_type::TEXT AS resource_type, r.url, r.added_at\n            FROM resources r\n            LEFT JOIN resource_concepts rc ON rc.resource_id = r.id\n            WHERE r.user_id = $1\n              AND ($2::uuid IS NULL OR r.topic_id = $2)\n              AND ($3::uuid IS NULL OR rc.concept_id = $3)\n              AND ($4::TEXT IS NULL OR r.resource_type::TEXT = $4)\n            ORDER BY r.added_at DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "topic_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "resource_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "added_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      true,
+      false
+    ]
+  },
+  "hash": "b2061850d53d2ff805a077a64d7e639ed148acda72ccdf22304b8e524434ef1e"
+}
