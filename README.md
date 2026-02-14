@@ -136,8 +136,8 @@ Full API documentation: [`fe/API_ENDPOINTS.md`](fe/API_ENDPOINTS.md)
 ## Project Structure
 
 ```
-learning-compass/
-├── be/                         # Rust backend
+./
+├── backend/                   # Axum backend
 │   ├── crates/
 │   │   ├── domain/            # Core domain models
 │   │   ├── app/               # Application services
@@ -148,7 +148,7 @@ learning-compass/
 │   │   └── state.rs           # App state management
 │   ├── migrations/            # Database schema versions
 │   └── docs/                  # Architecture docs
-├── fe/                        # React frontend
+├── frontend/                  # React frontend
 │   ├── src/
 │   │   ├── components/        # React components
 │   │   ├── pages/             # Route-level pages
