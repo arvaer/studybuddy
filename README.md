@@ -93,7 +93,7 @@ Topics → Concepts → Reinforcement Units → Questions
 cd be
 
 # Set environment variables
-export DATABASE_URL="postgresql://user:pass@localhost/learning_compass"
+export DATABASE_URL="postgresql://user:pass@localhost/sb"
 export JWT_SECRET="your-secret-key"
 export OPENAI_API_KEY="your-openai-key"
 
@@ -108,16 +108,16 @@ Server runs on `http://localhost:3000`
 
 ### Frontend Setup
 ```bash
-cd fe
+cd frontend
 
 # Install dependencies
-bun install
+npm install
 
 # Start dev server
-bun run dev
+npm run dev
 ```
 
-Frontend runs on `http://localhost:5173`
+Frontend runs on `http://localhost:8080`
 
 ## API Overview
 
