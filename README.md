@@ -1,6 +1,7 @@
-# Learning Compass
+# Study Buddy
 
 An AI-powered spaced repetition learning system that automatically extracts knowledge from study materials and generates reinforcement units for long-term retention.
+<img width="1653" height="645" alt="image" src="https://github.com/user-attachments/assets/e2381b48-bd33-46e4-8519-7af38d7d48aa" />
 
 ## Overview
 
@@ -10,7 +11,7 @@ Learning Compass explores the intersection of spaced repetition systems (SRS) an
 
 ## Architecture
 
-### Backend (`/be`)
+### Backend (`/backend`)
 - **Language:** Rust
 - **Framework:** Axum (async web framework)
 - **Database:** PostgreSQL with SQLx
@@ -26,7 +27,7 @@ be/
 └── migrations/     # SQL schema definitions
 ```
 
-### Frontend (`/fe`)
+### Frontend (`/frontend`)
 - **Framework:** React 18 + TypeScript
 - **Build:** Vite
 - **UI:** shadcn/ui + Tailwind CSS
