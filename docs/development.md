@@ -35,6 +35,7 @@ Configuration is read once at startup by `backend/src/config.rs`, which is the s
 | `CORS_ORIGIN` | no | `http://localhost:8080` |
 | `UPLOADS_DIR` | no | `data/uploads` (relative to the working directory) |
 | `RUST_LOG` | no | `lugia=debug,tower_http=debug` |
+| `COOKIE_SECURE` | no | `true`; set `false` only for plain-http development if your browser drops Secure cookies on localhost (see [auth.md](auth.md)) |
 | `LLM_PROVIDER` | no | unset means no model access; `POST /api/llm/proxy` answers 503. Values: `anthropic`, `openai` (also Ollama and other OpenAI-compatible servers) |
 | `LLM_API_KEY` | with a provider | none; never logged. Ollama ignores it but a placeholder is still required |
 | `LLM_MODEL` | with a provider | none |
