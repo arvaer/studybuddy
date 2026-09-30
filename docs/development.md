@@ -53,6 +53,7 @@ export JWT_SECRET="$(openssl rand -base64 48)"   # or put it in backend/.env
 cargo build            # compiles SQLx queries against $DATABASE_URL
 cargo test --workspace
 cargo run              # listens on 0.0.0.0:3000
+cargo run -- audit-artifacts   # compares the artifact catalog with UPLOADS_DIR and exits; see artifacts.md
 ```
 
 ### Backend tests
