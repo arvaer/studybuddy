@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO reinforcement_units (concept_id, claim, context)\n            VALUES ($1, $2, $3)\n            RETURNING\n                id, concept_id, claim, context, claim_id, dependency_cost,\n                state::TEXT AS state,\n                stability_score, reinforcement_count, last_reinforced,\n                ease_factor, interval_days, due_at, source_resource_id, created_at\n            ",
+  "query": "\n            INSERT INTO reinforcement_units (concept_id, claim, context)\n            SELECT c.id, $2, $3 FROM concepts c WHERE c.id = $1 AND c.user_id = $4\n            RETURNING\n                id, concept_id, claim, context, claim_id, dependency_cost,\n                state::TEXT AS state,\n                stability_score, reinforcement_count, last_reinforced,\n                ease_factor, interval_days, due_at, source_resource_id, created_at\n            ",
   "describe": {
     "columns": [
       {
@@ -83,7 +83,8 @@
       "Left": [
         "Uuid",
         "Text",
-        "Text"
+        "Text",
+        "Uuid"
       ]
     },
     "nullable": [
@@ -104,5 +105,5 @@
       false
     ]
   },
-  "hash": "bf8c1e0518d4e2d0943045fa403dab340a9b80b8f1d7236a1271abb8d473b84e"
+  "hash": "1798bbd31fdfce8954f29c6f38664a6549072567935873ded83355805e52f4fb"
 }

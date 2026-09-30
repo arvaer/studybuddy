@@ -50,7 +50,7 @@ impl<Q: QuestionRepository, R: ReinforcementUnitRepository> QuestionService<Q, R
         let is_correct = question.correct_answer.trim().to_lowercase()
             == req.answer.trim().to_lowercase();
 
-        let ru = self.ru_service.get(question.ru_id).await?;
+        let ru = self.ru_service.get(question.ru_id, user_id).await?;
 
         // Build update request based on correctness
         use crate::dtos::reinforcement_unit::UpdateRuRequest;
@@ -60,6 +60,7 @@ impl<Q: QuestionRepository, R: ReinforcementUnitRepository> QuestionService<Q, R
             .ru_service
             .update_after_review(
                 question.ru_id,
+                user_id,
                 UpdateRuRequest {
                     state:               Some(new_state),
                     stability_score:     Some(new_stability),

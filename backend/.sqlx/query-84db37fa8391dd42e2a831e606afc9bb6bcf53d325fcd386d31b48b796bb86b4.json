@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                ru.id, ru.concept_id, ru.claim, ru.context,\n                ru.claim_id, ru.dependency_cost,\n                ru.state::TEXT AS state,\n                ru.stability_score, ru.reinforcement_count, ru.last_reinforced,\n                ru.ease_factor, ru.interval_days, ru.due_at, ru.source_resource_id, ru.created_at,\n                COALESCE(\n                    array_agg(rd.depends_on_id) FILTER (WHERE rd.depends_on_id IS NOT NULL),\n                    '{}'\n                ) AS \"dependencies!\"\n            FROM reinforcement_units ru\n            LEFT JOIN ru_dependencies rd ON rd.ru_id = ru.id\n            WHERE ($1::uuid IS NULL OR ru.concept_id = $1)\n              AND ($2::TEXT IS NULL OR ru.state::TEXT = $2)\n            GROUP BY ru.id\n            ORDER BY ru.created_at ASC\n            ",
+  "query": "\n            SELECT\n                ru.id, ru.concept_id, ru.claim, ru.context,\n                ru.claim_id, ru.dependency_cost,\n                ru.state::TEXT AS state,\n                ru.stability_score, ru.reinforcement_count, ru.last_reinforced,\n                ru.ease_factor, ru.interval_days, ru.due_at, ru.source_resource_id, ru.created_at,\n                COALESCE(\n                    array_agg(rd.depends_on_id) FILTER (WHERE rd.depends_on_id IS NOT NULL),\n                    '{}'\n                ) AS \"dependencies!\"\n            FROM reinforcement_units ru\n            JOIN concepts c ON c.id = ru.concept_id\n            LEFT JOIN ru_dependencies rd ON rd.ru_id = ru.id\n            WHERE ru.id = $1 AND c.user_id = $2\n            GROUP BY ru.id\n            ",
   "describe": {
     "columns": [
       {
@@ -87,7 +87,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -109,5 +109,5 @@
       null
     ]
   },
-  "hash": "84c62a005430d248d2c3b69c2e140c919e87328b04c72f8609cce77c55e11149"
+  "hash": "84db37fa8391dd42e2a831e606afc9bb6bcf53d325fcd386d31b48b796bb86b4"
 }

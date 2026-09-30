@@ -48,6 +48,8 @@ cargo run              # listens on 0.0.0.0:3000
 
 Repository tests live in `backend/crates/<crate>/tests/` and use `#[sqlx::test(migrations = "../../migrations")]` (see `crates/infra/tests/user_repository.rs`). Each test gets its own freshly migrated database on the server at `DATABASE_URL`, which sqlx creates before the test and drops after it. Tests therefore never share state, and the disposable container is the only server they should ever see. Add a new test file per repository or service; no further wiring is needed.
 
+Ownership tests follow the convention in [ownership.md](ownership.md).
+
 Unit tests without a database go in the usual `#[cfg(test)] mod tests` blocks and run in the same `cargo test`.
 
 To build without a database, set `SQLX_OFFLINE=true`. This uses the committed `backend/.sqlx` query cache. **Whenever a `sqlx::query!` changes, regenerate the cache and commit it:**

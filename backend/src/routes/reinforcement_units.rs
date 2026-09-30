@@ -40,7 +40,7 @@ async fn create(
         .map_err(|_| HttpError(app::errors::AppError::Validation("invalid concept_id".into())))?;
 
     let svc = RuService::new(PgRuRepository::new(state.pool.clone()));
-    let created = svc.create(req).await?;
+    let created = svc.create(user_id, req).await?;
 
     // Append event for each created RU (fire-and-forget)
     let event_svc = EventService::new(PgEventRepository::new(state.pool.clone()));
@@ -72,28 +72,28 @@ async fn create(
 
 async fn list(
     State(state): State<AppState>,
-    AuthUser(_user_id): AuthUser,
+    AuthUser(user_id): AuthUser,
     Query(q): Query<ListQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
     let svc = RuService::new(PgRuRepository::new(state.pool));
-    Ok(Json(svc.list(q.concept_id, q.state.as_deref()).await?))
+    Ok(Json(svc.list(user_id, q.concept_id, q.state.as_deref()).await?))
 }
 
 async fn get_one(
     State(state): State<AppState>,
-    AuthUser(_user_id): AuthUser,
+    AuthUser(user_id): AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, HttpError> {
     let svc = RuService::new(PgRuRepository::new(state.pool));
-    Ok(Json(svc.get(id).await?))
+    Ok(Json(svc.get(id, user_id).await?))
 }
 
 async fn update(
     State(state): State<AppState>,
-    AuthUser(_user_id): AuthUser,
+    AuthUser(user_id): AuthUser,
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateRuRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
     let svc = RuService::new(PgRuRepository::new(state.pool));
-    Ok(Json(svc.update_after_review(id, req).await?))
+    Ok(Json(svc.update_after_review(id, user_id, req).await?))
 }
