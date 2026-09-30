@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(*) AS \"n!\"\n        FROM reinforcement_units ru\n        JOIN concepts c ON c.id = ru.concept_id\n        WHERE c.user_id = $1 AND ru.id = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8209c93a7e622fdda48e90b11ea06a60674f8f73a21050b6679d21115ee2cd8e"
+}

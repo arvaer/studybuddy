@@ -68,6 +68,9 @@ impl ResourceRepository for PgResourceRepository {
         url: Option<&str>,
         concept_ids: &[Uuid],
     ) -> Result<Resource, DomainError> {
+        super::owned::topic(&self.pool, user_id, Some(topic_id)).await?;
+        super::owned::concepts(&self.pool, user_id, concept_ids).await?;
+
         let row = sqlx::query(
             r#"
             INSERT INTO resources (user_id, topic_id, title, resource_type, url)
@@ -128,6 +131,9 @@ impl ResourceRepository for PgResourceRepository {
         content_pages: &[String],
         concept_ids: &[Uuid],
     ) -> Result<Resource, DomainError> {
+        super::owned::topic(&self.pool, user_id, Some(topic_id)).await?;
+        super::owned::concepts(&self.pool, user_id, concept_ids).await?;
+
         let pages_json = serde_json::to_value(content_pages)
             .map_err(|e| DomainError::Repository(e.to_string()))?;
 
