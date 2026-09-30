@@ -196,9 +196,13 @@ pub trait QuestionRepository: Send + Sync {
         explanation: &str,
     ) -> impl std::future::Future<Output = Result<Question, DomainError>> + Send;
 
-    fn find_by_id(
+    /// Look up a question only if it belongs to `user_id` through its
+    /// reinforcement unit's concept. A foreign question is `NotFound`, the
+    /// same as a nonexistent one, so callers cannot tell them apart.
+    fn find_owned(
         &self,
         id: Uuid,
+        user_id: Uuid,
     ) -> impl std::future::Future<Output = Result<Question, DomainError>> + Send;
 
     fn list(

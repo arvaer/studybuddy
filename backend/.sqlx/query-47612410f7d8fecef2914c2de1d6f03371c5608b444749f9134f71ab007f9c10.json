@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, ru_id, question_type::TEXT AS question_type,\n                   prompt, options, correct_answer, explanation, created_at\n            FROM questions WHERE id = $1\n            ",
+  "query": "\n            SELECT q.id, q.ru_id, q.question_type::TEXT AS question_type,\n                   q.prompt, q.options, q.correct_answer, q.explanation, q.created_at\n            FROM questions q\n            JOIN reinforcement_units ru ON ru.id = q.ru_id\n            JOIN concepts c ON c.id = ru.concept_id\n            WHERE q.id = $1 AND c.user_id = $2\n            ",
   "describe": {
     "columns": [
       {
@@ -46,6 +46,7 @@
     ],
     "parameters": {
       "Left": [
+        "Uuid",
         "Uuid"
       ]
     },
@@ -60,5 +61,5 @@
       false
     ]
   },
-  "hash": "51921ff6ee22ff750bbda2b25af33494588c2266c4220e88b95dde429f615068"
+  "hash": "47612410f7d8fecef2914c2de1d6f03371c5608b444749f9134f71ab007f9c10"
 }

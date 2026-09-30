@@ -73,14 +73,18 @@ impl QuestionRepository for PgQuestionRepository {
         })
     }
 
-    async fn find_by_id(&self, id: Uuid) -> Result<Question, DomainError> {
+    async fn find_owned(&self, id: Uuid, user_id: Uuid) -> Result<Question, DomainError> {
         let row = sqlx::query!(
             r#"
-            SELECT id, ru_id, question_type::TEXT AS question_type,
-                   prompt, options, correct_answer, explanation, created_at
-            FROM questions WHERE id = $1
+            SELECT q.id, q.ru_id, q.question_type::TEXT AS question_type,
+                   q.prompt, q.options, q.correct_answer, q.explanation, q.created_at
+            FROM questions q
+            JOIN reinforcement_units ru ON ru.id = q.ru_id
+            JOIN concepts c ON c.id = ru.concept_id
+            WHERE q.id = $1 AND c.user_id = $2
             "#,
             id,
+            user_id,
         )
         .fetch_optional(&self.pool)
         .await
