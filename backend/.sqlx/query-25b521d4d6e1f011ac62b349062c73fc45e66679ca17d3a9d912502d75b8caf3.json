@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT a.id, a.activity_revision_id, a.submitted_at,\n               s.outcome::TEXT AS \"outcome?\", s.method::TEXT AS \"method?\",\n               s.score AS \"score?\", s.feedback AS \"feedback?\"\n        FROM attempts a\n        LEFT JOIN LATERAL (\n            SELECT outcome, method, score, feedback FROM assessments\n            WHERE attempt_id = a.id ORDER BY revision DESC LIMIT 1\n        ) s ON true\n        WHERE a.id = $1 AND a.user_id = $2\n        ",
+  "query": "\n        SELECT a.id, a.activity_revision_id, a.submitted_at, a.response,\n               s.outcome::TEXT AS \"outcome?\", s.method::TEXT AS \"method?\",\n               s.score AS \"score?\", s.feedback AS \"feedback?\"\n        FROM attempts a\n        LEFT JOIN LATERAL (\n            SELECT outcome, method, score, feedback FROM assessments\n            WHERE attempt_id = a.id ORDER BY revision DESC LIMIT 1\n        ) s ON true\n        WHERE a.id = $1 AND a.user_id = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -20,21 +20,26 @@
       },
       {
         "ordinal": 3,
+        "name": "response",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
         "name": "outcome?",
         "type_info": "Text"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "method?",
         "type_info": "Text"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "score?",
         "type_info": "Float8"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "feedback?",
         "type_info": "Text"
       }
@@ -49,11 +54,12 @@
       false,
       false,
       false,
+      false,
       null,
       null,
       true,
       false
     ]
   },
-  "hash": "c1ffe49ccd092141897f50a97a823a53d9905b2bc236f657141ec2a58765bfed"
+  "hash": "25b521d4d6e1f011ac62b349062c73fc45e66679ca17d3a9d912502d75b8caf3"
 }

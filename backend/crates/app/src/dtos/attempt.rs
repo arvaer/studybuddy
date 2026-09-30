@@ -38,6 +38,8 @@ pub struct AttemptReceiptResponse {
     pub submitted_at:         String,
     /// `pending`, `correct`, `partial` or `incorrect`.
     pub status:               String,
+    /// The answer exactly as submitted.
+    pub response:             Value,
     pub assessment:           Option<Assessment>,
 }
 
@@ -48,6 +50,7 @@ impl From<AttemptReceipt> for AttemptReceiptResponse {
             attempt_id:           r.attempt_id.to_string(),
             activity_revision_id: r.activity_revision_id.to_string(),
             submitted_at:         r.submitted_at.to_rfc3339(),
+            response:             r.response,
             assessment:           r.assessment,
         }
     }

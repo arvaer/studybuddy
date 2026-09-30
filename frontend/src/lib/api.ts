@@ -11,13 +11,18 @@ import type {
 
 // ─── Generic request helpers ────────────────────────────────────────────────
 
-class ApiError extends Error {
+export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+/// A response with its status, for callers that distinguish 200 from 201.
+export async function requestWithStatus<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<{ status: number; body: T }> {
   const opts: RequestInit = {
     method,
     credentials: "include",
@@ -32,8 +37,12 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     throw new ApiError(res.status, payload?.error ?? res.statusText);
   }
   // 204 No Content
-  if (res.status === 204) return undefined as T;
-  return res.json();
+  if (res.status === 204) return { status: res.status, body: undefined as T };
+  return { status: res.status, body: await res.json() };
+}
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  return (await requestWithStatus<T>(method, path, body)).body;
 }
 
 export function apiGet<T>(path: string): Promise<T> {

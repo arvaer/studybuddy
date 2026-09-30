@@ -1,0 +1,132 @@
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { ActivityCard } from "./activity-card";
+import { ApiError } from "@/lib/api";
+import type { AttemptReceipt, Revision } from "@/lib/activities";
+import { memoryStorage, type AttemptClient } from "@/lib/attempt-state";
+
+const revision: Revision = {
+  id: "rev-1",
+  activityId: "act-1",
+  revision: 1,
+  prompt: "Which update rule is on-policy?",
+  options: ["Q-learning", "SARSA", "DQN"],
+  hasAnswerKey: true,
+  sourceResourceId: null,
+  sourceArtifactId: null,
+  sourceLocation: null,
+  createdAt: "2026-09-30T00:00:00Z",
+};
+
+function receipt(status: AttemptReceipt["status"]): AttemptReceipt {
+  return { attemptId: "att-1", activityRevisionId: "rev-1", submittedAt: "2026-09-30T00:00:00Z", status, response: "SARSA", assessment: null };
+}
+
+function client(over: Partial<AttemptClient> = {}): AttemptClient {
+  return {
+    record: vi.fn(async () => ({ receipt: receipt("correct"), replayed: false })),
+    fetch: vi.fn(async () => receipt("correct")),
+    newKey: () => "key-1",
+    ...over,
+  };
+}
+
+const phaseOf = () => screen.getByText(revision.prompt).closest("[data-phase]")!.getAttribute("data-phase");
+
+describe("ActivityCard", () => {
+  it("renders the accepted receipt after submitting through the backend", async () => {
+    const c = client();
+    render(<ActivityCard revision={revision} deps={{ storage: memoryStorage(), client: c }} />);
+    await waitFor(() => expect(phaseOf()).toBe("draft"));
+
+    fireEvent.click(screen.getByRole("radio", { name: /SARSA/ }));
+    expect(screen.getByText("Draft, not submitted")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+
+    await waitFor(() => expect(phaseOf()).toBe("accepted"));
+    expect(screen.getByText("Correct")).toBeInTheDocument();
+    expect(c.record).toHaveBeenCalledWith({ requestKey: "key-1", activityRevisionId: "rev-1", response: "SARSA", assistance: [] });
+    expect(screen.queryByRole("button", { name: "Submit answer" })).not.toBeInTheDocument();
+  });
+
+  it("shows pending as recorded and awaiting, not as wrong", async () => {
+    const c = client({ record: vi.fn(async () => ({ receipt: receipt("pending"), replayed: false })) });
+    render(<ActivityCard revision={{ ...revision, options: null, hasAnswerKey: false }} deps={{ storage: memoryStorage(), client: c }} />);
+    await waitFor(() => expect(phaseOf()).toBe("draft"));
+
+    fireEvent.change(screen.getByLabelText("Your answer"), { target: { value: "It bootstraps from the action actually taken." } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+
+    await waitFor(() => expect(phaseOf()).toBe("accepted"));
+    expect(screen.getByText("Recorded, awaiting assessment")).toBeInTheDocument();
+    expect(screen.queryByText(/Not quite/)).not.toBeInTheDocument();
+  });
+
+  it("offers a retry after a network failure that resends the same request key", async () => {
+    const record = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce({ receipt: receipt("incorrect"), replayed: true });
+    const c = client({ record });
+    render(<ActivityCard revision={revision} deps={{ storage: memoryStorage(), client: c }} />);
+    await waitFor(() => expect(phaseOf()).toBe("draft"));
+
+    fireEvent.click(screen.getByRole("radio", { name: /DQN/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    await waitFor(() => expect(phaseOf()).toBe("failed"));
+    expect(screen.getByText("Not submitted: Failed to fetch")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(phaseOf()).toBe("accepted"));
+    expect(screen.getByText("Not quite right")).toBeInTheDocument();
+    expect(screen.getByText("(already recorded)")).toBeInTheDocument();
+    expect(record.mock.calls.map((call) => call[0].requestKey)).toEqual(["key-1", "key-1"]);
+  });
+
+  it("does not offer a retry for a rejected payload", async () => {
+    const c = client({ record: vi.fn().mockRejectedValue(new ApiError(422, "response must be one of the options")) });
+    render(<ActivityCard revision={revision} deps={{ storage: memoryStorage(), client: c }} />);
+    await waitFor(() => expect(phaseOf()).toBe("draft"));
+
+    fireEvent.click(screen.getByRole("radio", { name: /DQN/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+
+    await waitFor(() => expect(phaseOf()).toBe("failed"));
+    expect(screen.getByText("Rejected: response must be one of the options")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
+  it("restores the accepted attempt from the backend after a remount, as a refresh would", async () => {
+    const storage = memoryStorage();
+    const c = client();
+    const first = render(<ActivityCard revision={revision} deps={{ storage, client: c }} />);
+    await waitFor(() => expect(phaseOf()).toBe("draft"));
+    fireEvent.click(screen.getByRole("radio", { name: /SARSA/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    await waitFor(() => expect(phaseOf()).toBe("accepted"));
+    first.unmount();
+
+    render(<ActivityCard revision={revision} deps={{ storage, client: c }} />);
+    expect(phaseOf()).toBe("restoring");
+    expect(screen.getByText("Loading your attempt")).toBeInTheDocument();
+    await waitFor(() => expect(phaseOf()).toBe("accepted"));
+    expect(c.fetch).toHaveBeenCalledWith("att-1");
+    expect(c.record).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("radio", { name: /SARSA/ })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("keeps an unsent draft across a remount", async () => {
+    const storage = memoryStorage();
+    const c = client();
+    const first = render(<ActivityCard revision={revision} deps={{ storage, client: c }} />);
+    await waitFor(() => expect(phaseOf()).toBe("draft"));
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: /Q-learning/ })));
+    first.unmount();
+
+    render(<ActivityCard revision={revision} deps={{ storage, client: c }} />);
+    await waitFor(() => expect(phaseOf()).toBe("draft"));
+    expect(screen.getByRole("radio", { name: /Q-learning/ })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("Draft, not submitted")).toBeInTheDocument();
+    expect(c.record).not.toHaveBeenCalled();
+  });
+});

@@ -3,16 +3,15 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronLeft,
   ChevronRight,
-  Check,
-  X as XIcon,
-  RotateCcw,
   Trophy,
   Target,
-  Zap,
+  Clock,
   Filter,
   Settings2,
   MessageCircleQuestion,
-  Loader2
+  Loader2,
+  AlertCircle,
+  RotateCcw,
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -27,8 +26,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
-import { fetchTopics, fetchConcepts, fetchQuestions, fetchRUs } from "@/lib/api";
+import { fetchTopics, fetchConcepts } from "@/lib/api";
+import { fetchActivities, type Activity, type AttemptStatus } from "@/lib/activities";
+import { ActivityCard } from "@/components/activity-card";
 import { QuizConfigModal } from "@/components/quiz-config-modal";
 import { QuizAiChat } from "@/components/quiz-ai-chat";
 import {
@@ -38,13 +38,13 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import type { Topic, Concept, Question, ReinforcementUnit } from "@/types/study";
+import type { Topic, Concept } from "@/types/study";
 import { QuizSessionConfig, defaultQuizConfig } from "@/types/study";
 
-type AnswerState = {
-  answer: string;
-  isCorrect: boolean;
-} | null;
+// The quiz (#13): a walk through the learner's activities. Each card submits
+// through the backend and renders what it accepted; this page only decides
+// which activity is on screen and tallies the accepted statuses it is told
+// about. Nothing here grades, and nothing here knows an answer key.
 
 export default function QuizPage() {
   const [searchParams] = useSearchParams();
@@ -53,15 +53,17 @@ export default function QuizPage() {
 
   const [topics, setTopics] = useState<Topic[]>([]);
   const [allConcepts, setAllConcepts] = useState<Concept[]>([]);
-  const [allQuestions, setAllQuestions] = useState<Question[]>([]);
-  const [allRUs, setAllRUs] = useState<ReinforcementUnit[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloads, setReloads] = useState(0);
 
   const [selectedTopicId, setSelectedTopicId] = useState(initialTopicId);
   const [selectedConceptId, setSelectedConceptId] = useState(initialConceptId);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
-  const [showFeedback, setShowFeedback] = useState(false);
+  // Accepted statuses by activity id, reported by the cards. Backend state,
+  // never computed here.
+  const [accepted, setAccepted] = useState<Record<string, AttemptStatus>>({});
   const [isComplete, setIsComplete] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(true);
   const [quizConfig, setQuizConfig] = useState<QuizSessionConfig>({
@@ -69,77 +71,50 @@ export default function QuizPage() {
     topicId: initialTopicId === 'all' ? null : initialTopicId,
     conceptId: initialConceptId === 'all' ? null : initialConceptId,
   });
-  const [sessionStarted, setSessionStarted] = useState(false);
 
-  // Fetch data on mount
   useEffect(() => {
     let cancelled = false;
-    async function load() {
-      try {
-        const [t, c, q, r] = await Promise.all([
-          fetchTopics(),
-          fetchConcepts(),
-          fetchQuestions(),
-          fetchRUs(),
-        ]);
+    setLoading(true);
+    setLoadError(null);
+    Promise.all([fetchTopics(), fetchConcepts(), fetchActivities()])
+      .then(([t, c, a]) => {
         if (cancelled) return;
         setTopics(t);
         setAllConcepts(c);
-        setAllQuestions(q);
-        setAllRUs(r);
-      } catch (err) {
-        console.error("Failed to load quiz data:", err);
-      } finally {
+        setActivities(a);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : "failed to load");
+      })
+      .finally(() => {
         if (!cancelled) setLoading(false);
-      }
-    }
-    load();
+      });
     return () => { cancelled = true; };
-  }, []);
+  }, [reloads]);
 
-  // Filter concepts based on selected topic
   const availableConcepts = useMemo(() => {
     if (selectedTopicId === 'all') return allConcepts;
     return allConcepts.filter(c => c.topicId === selectedTopicId);
   }, [selectedTopicId, allConcepts]);
 
-  // Filter questions based on topic and concept selection
-  const filteredQuestions = useMemo(() => {
-    return allQuestions.filter(question => {
-      const ru = allRUs.find(r => r.id === question.ruId);
-      if (!ru) return false;
-
-      const concept = allConcepts.find(c => c.id === ru.conceptId);
-      if (!concept) return false;
-
-      // Check topic filter
-      if (selectedTopicId !== 'all' && concept.topicId !== selectedTopicId) {
-        return false;
+  const filtered = useMemo(() => {
+    return activities.filter(activity => {
+      if (selectedConceptId !== 'all') return activity.conceptId === selectedConceptId;
+      if (selectedTopicId !== 'all') {
+        const concept = allConcepts.find(c => c.id === activity.conceptId);
+        return concept?.topicId === selectedTopicId;
       }
-
-      // Check concept filter
-      if (selectedConceptId !== 'all' && concept.id !== selectedConceptId) {
-        return false;
-      }
-
       return true;
     });
-  }, [selectedTopicId, selectedConceptId, allQuestions, allRUs, allConcepts]);
+  }, [selectedTopicId, selectedConceptId, activities, allConcepts]);
 
-  const [answers, setAnswers] = useState<(AnswerState)[]>(
-    new Array(filteredQuestions.length).fill(null)
-  );
-
-  // Reset quiz state when filters change
+  // A filter change starts the walk over. Accepted statuses are kept: they
+  // are the backend's, and the card will show them again anyway.
   useEffect(() => {
     setCurrentIndex(0);
-    setAnswers(new Array(filteredQuestions.length).fill(null));
-    setSelectedAnswer(null);
-    setShowFeedback(false);
     setIsComplete(false);
-  }, [filteredQuestions.length]);
+  }, [filtered.length]);
 
-  // Reset concept filter when topic changes
   useEffect(() => {
     if (selectedTopicId !== 'all') {
       const conceptStillValid = availableConcepts.some(c => c.id === selectedConceptId);
@@ -149,40 +124,25 @@ export default function QuizPage() {
     }
   }, [selectedTopicId, availableConcepts, selectedConceptId]);
 
-  const currentQuestion = filteredQuestions[currentIndex];
-  const progress = filteredQuestions.length > 0 ? ((currentIndex + 1) / filteredQuestions.length) * 100 : 0;
-  const correctCount = answers.filter(a => a?.isCorrect).length;
-  const answeredCount = answers.filter(a => a !== null).length;
-
-  const handleSubmit = () => {
-    if (!selectedAnswer || !currentQuestion) return;
-
-    const isCorrect = selectedAnswer === currentQuestion.correctAnswer;
-    const newAnswers = [...answers];
-    newAnswers[currentIndex] = { answer: selectedAnswer, isCorrect };
-    setAnswers(newAnswers);
-    setShowFeedback(true);
-  };
+  const current = filtered[currentIndex];
+  const progress = filtered.length > 0 ? ((currentIndex + 1) / filtered.length) * 100 : 0;
+  const tally = useMemo(() => {
+    const t = { correct: 0, partial: 0, incorrect: 0, pending: 0, answered: 0 };
+    for (const a of filtered) {
+      const s = accepted[a.id];
+      if (s) { t[s] += 1; t.answered += 1; }
+    }
+    return t;
+  }, [filtered, accepted]);
 
   const handleNext = () => {
-    if (currentIndex < filteredQuestions.length - 1) {
+    if (currentIndex < filtered.length - 1) {
       setCurrentIndex(currentIndex + 1);
-      setSelectedAnswer(null);
-      setShowFeedback(false);
     } else {
       setIsComplete(true);
     }
   };
 
-  const handleRestart = () => {
-    setCurrentIndex(0);
-    setAnswers(new Array(filteredQuestions.length).fill(null));
-    setSelectedAnswer(null);
-    setShowFeedback(false);
-    setIsComplete(false);
-  };
-
-  // Get current filter label for display
   const getFilterLabel = () => {
     if (selectedConceptId !== 'all') {
       return allConcepts.find(c => c.id === selectedConceptId)?.name || 'Quiz';
@@ -193,26 +153,33 @@ export default function QuizPage() {
     return 'All Topics';
   };
 
-  // Calculate due and new cards for SRS display
-  const dueCards = useMemo(() => {
-    return filteredQuestions.filter(q => {
-      const ru = allRUs.find(r => r.id === q.ruId);
-      return ru && (ru.state === 'unstable' || ru.state === 'introduced');
-    }).length;
-  }, [filteredQuestions, allRUs]);
-
-  const newCards = useMemo(() => {
-    return filteredQuestions.filter(q => {
-      const ru = allRUs.find(r => r.id === q.ruId);
-      return ru && ru.state === 'introduced';
-    }).length;
-  }, [filteredQuestions, allRUs]);
-
-  const handleStartQuiz = () => {
-    setShowConfigModal(false);
-    setSessionStarted(true);
-    handleRestart();
-  };
+  const filters = (
+    <div className="flex items-center gap-2">
+      <Filter className="h-4 w-4 text-muted-foreground" />
+      <Select value={selectedTopicId} onValueChange={setSelectedTopicId}>
+        <SelectTrigger className="w-[140px] h-8">
+          <SelectValue placeholder="All Topics" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All Topics</SelectItem>
+          {topics.map(topic => (
+            <SelectItem key={topic.id} value={topic.id}>{topic.name}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select value={selectedConceptId} onValueChange={setSelectedConceptId}>
+        <SelectTrigger className="w-[160px] h-8">
+          <SelectValue placeholder="All Concepts" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All Concepts</SelectItem>
+          {availableConcepts.map(concept => (
+            <SelectItem key={concept.id} value={concept.id}>{concept.name}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
 
   if (loading) {
     return (
@@ -224,12 +191,23 @@ export default function QuizPage() {
     );
   }
 
-  // No questions available for current filter
-  if (filteredQuestions.length === 0) {
+  if (loadError) {
+    return (
+      <AppLayout>
+        <div className="flex-1 flex flex-col items-center justify-center p-8 gap-4 text-center">
+          <p className="text-unstable flex items-center gap-2"><AlertCircle className="h-4 w-4" /> Could not load activities: {loadError}</p>
+          <Button variant="outline" onClick={() => setReloads(n => n + 1)}>
+            <RotateCcw className="h-4 w-4 mr-2" /> Retry
+          </Button>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (filtered.length === 0) {
     return (
       <AppLayout>
         <div className="flex flex-col min-h-full">
-          {/* Header with filters */}
           <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-card/50">
             <div className="flex items-center gap-3">
               <Link to="/">
@@ -237,43 +215,13 @@ export default function QuizPage() {
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
               </Link>
-              <div>
-                <h1 className="font-display font-semibold text-foreground">
-                  Practice Quiz
-                </h1>
-              </div>
+              <h1 className="font-display font-semibold text-foreground">Practice Quiz</h1>
             </div>
-
-            <div className="flex items-center gap-2">
-              <Filter className="h-4 w-4 text-muted-foreground" />
-              <Select value={selectedTopicId} onValueChange={setSelectedTopicId}>
-                <SelectTrigger className="w-[140px] h-8">
-                  <SelectValue placeholder="All Topics" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Topics</SelectItem>
-                  {topics.map(topic => (
-                    <SelectItem key={topic.id} value={topic.id}>{topic.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={selectedConceptId} onValueChange={setSelectedConceptId}>
-                <SelectTrigger className="w-[160px] h-8">
-                  <SelectValue placeholder="All Concepts" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Concepts</SelectItem>
-                  {availableConcepts.map(concept => (
-                    <SelectItem key={concept.id} value={concept.id}>{concept.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {filters}
           </header>
-
           <div className="flex-1 flex items-center justify-center p-8">
             <div className="text-center">
-              <p className="text-muted-foreground mb-4">No questions available for the selected filters.</p>
+              <p className="text-muted-foreground mb-4">No activities available for the selected filters.</p>
               <Button variant="outline" onClick={() => { setSelectedTopicId('all'); setSelectedConceptId('all'); }}>
                 Clear Filters
               </Button>
@@ -285,59 +233,46 @@ export default function QuizPage() {
   }
 
   if (isComplete) {
-    const score = (correctCount / filteredQuestions.length) * 100;
+    const assessed = tally.correct + tally.partial + tally.incorrect;
+    const score = assessed > 0 ? (tally.correct / assessed) * 100 : 0;
     return (
       <AppLayout>
         <div className="flex items-center justify-center min-h-full p-8">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="text-center max-w-md"
-          >
+          <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="text-center max-w-md">
             <div className="mb-6 flex justify-center">
-              <ProgressRing
-                progress={score}
-                size={120}
-                strokeWidth={8}
-                variant={score >= 70 ? 'stable' : score >= 50 ? 'accent' : 'unstable'}
-              />
+              <ProgressRing progress={score} size={120} strokeWidth={8} variant={score >= 70 ? 'stable' : score >= 50 ? 'accent' : 'unstable'} />
             </div>
-
             <p className="text-sm text-muted-foreground mb-2">{getFilterLabel()}</p>
             <h1 className="font-display text-3xl font-bold text-foreground mb-2">
-              {score >= 70 ? 'Great job!' : score >= 50 ? 'Good effort!' : 'Keep practicing!'}
+              {assessed === 0 ? 'Recorded' : score >= 70 ? 'Great job!' : score >= 50 ? 'Good effort!' : 'Keep practicing!'}
             </h1>
             <p className="text-muted-foreground mb-8">
-              You got {correctCount} out of {filteredQuestions.length} questions correct
+              {tally.correct} of {assessed} assessed answers correct
+              {tally.pending > 0 && `, ${tally.pending} awaiting assessment`}
             </p>
-
             <div className="grid grid-cols-3 gap-4 mb-8">
               <Card className="p-4 text-center">
                 <Trophy className="h-5 w-5 text-accent mx-auto mb-2" />
-                <p className="text-2xl font-display font-bold text-foreground">{correctCount}</p>
+                <p className="text-2xl font-display font-bold text-foreground">{tally.correct}</p>
                 <p className="text-xs text-muted-foreground">Correct</p>
               </Card>
               <Card className="p-4 text-center">
-                <Target className="h-5 w-5 text-stable mx-auto mb-2" />
-                <p className="text-2xl font-display font-bold text-foreground">{Math.round(score)}%</p>
-                <p className="text-xs text-muted-foreground">Accuracy</p>
+                <Clock className="h-5 w-5 text-introduced mx-auto mb-2" />
+                <p className="text-2xl font-display font-bold text-foreground">{tally.pending}</p>
+                <p className="text-xs text-muted-foreground">Pending</p>
               </Card>
               <Card className="p-4 text-center">
-                <Zap className="h-5 w-5 text-introduced mx-auto mb-2" />
-                <p className="text-2xl font-display font-bold text-foreground">{filteredQuestions.length}</p>
-                <p className="text-xs text-muted-foreground">Questions</p>
+                <Target className="h-5 w-5 text-stable mx-auto mb-2" />
+                <p className="text-2xl font-display font-bold text-foreground">{tally.answered}/{filtered.length}</p>
+                <p className="text-xs text-muted-foreground">Recorded</p>
               </Card>
             </div>
-
             <div className="flex gap-3 justify-center">
-              <Button variant="outline" onClick={handleRestart}>
-                <RotateCcw className="h-4 w-4 mr-2" />
-                Try Again
+              <Button variant="outline" onClick={() => { setCurrentIndex(0); setIsComplete(false); }}>
+                Review answers
               </Button>
               <Link to="/">
-                <Button>
-                  Back to Dashboard
-                </Button>
+                <Button>Back to Dashboard</Button>
               </Link>
             </div>
           </motion.div>
@@ -346,10 +281,11 @@ export default function QuizPage() {
     );
   }
 
+  const currentStatus = accepted[current.id];
+
   return (
     <AppLayout>
       <div className="flex flex-col min-h-full">
-        {/* Header with filters */}
         <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-card/50">
           <div className="flex items-center gap-3">
             <Link to="/">
@@ -358,174 +294,57 @@ export default function QuizPage() {
               </Button>
             </Link>
             <div>
-              <h1 className="font-display font-semibold text-foreground">
-                {getFilterLabel()}
-              </h1>
+              <h1 className="font-display font-semibold text-foreground">{getFilterLabel()}</h1>
               <p className="text-xs text-muted-foreground">
-                Question {currentIndex + 1} of {filteredQuestions.length}
+                Activity {currentIndex + 1} of {filtered.length} · {current.kind} · revision {current.current.revision}
               </p>
             </div>
           </div>
-
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Filter className="h-4 w-4 text-muted-foreground" />
-              <Select value={selectedTopicId} onValueChange={setSelectedTopicId}>
-                <SelectTrigger className="w-[140px] h-8">
-                  <SelectValue placeholder="All Topics" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Topics</SelectItem>
-                  {topics.map(topic => (
-                    <SelectItem key={topic.id} value={topic.id}>{topic.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={selectedConceptId} onValueChange={setSelectedConceptId}>
-                <SelectTrigger className="w-[160px] h-8">
-                  <SelectValue placeholder="All Concepts" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Concepts</SelectItem>
-                  {availableConcepts.map(concept => (
-                    <SelectItem key={concept.id} value={concept.id}>{concept.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => setShowConfigModal(true)}
-              >
-                <Settings2 className="h-4 w-4" />
-              </Button>
-            </div>
+            {filters}
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowConfigModal(true)}>
+              <Settings2 className="h-4 w-4" />
+            </Button>
             <div className="text-right">
-              <p className="text-sm font-medium text-foreground">{correctCount}/{answeredCount}</p>
-              <p className="text-xs text-muted-foreground">correct</p>
+              <p className="text-sm font-medium text-foreground">{tally.correct}/{tally.answered}</p>
+              <p className="text-xs text-muted-foreground">correct{tally.pending > 0 && `, ${tally.pending} pending`}</p>
             </div>
           </div>
         </header>
 
-        {/* Progress */}
         <div className="px-6 py-2 border-b border-border/50">
           <Progress value={progress} className="h-1.5" />
         </div>
 
-        {/* Question */}
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="w-full max-w-2xl">
             <AnimatePresence mode="wait">
               <motion.div
-                key={currentIndex}
+                key={current.current.id}
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
                 transition={{ duration: 0.2 }}
               >
-                <Card className="p-8 shadow-medium">
-                  {/* Question type badge */}
-                  <div className="mb-4">
-                    <span className={cn(
-                      "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
-                      currentQuestion.type === 'recall' && "bg-introduced/10 text-introduced",
-                      currentQuestion.type === 'application' && "bg-accent/10 text-accent",
-                      currentQuestion.type === 'disambiguation' && "bg-stable/10 text-stable"
-                    )}>
-                      {currentQuestion.type.charAt(0).toUpperCase() + currentQuestion.type.slice(1)}
-                    </span>
-                  </div>
-
-                  {/* Question */}
-                  <h2 className="font-display text-xl font-semibold text-foreground mb-6 leading-relaxed">
-                    {currentQuestion.prompt}
-                  </h2>
-
-                  {/* Options */}
-                  <div className="space-y-3">
-                    {currentQuestion.options?.map((option, index) => {
-                      const isSelected = selectedAnswer === option;
-                      const isCorrectOption = option === currentQuestion.correctAnswer;
-                      const showCorrect = showFeedback && isCorrectOption;
-                      const showIncorrect = showFeedback && isSelected && !isCorrectOption;
-
-                      return (
-                        <motion.button
-                          key={index}
-                          whileHover={{ scale: showFeedback ? 1 : 1.01 }}
-                          whileTap={{ scale: showFeedback ? 1 : 0.99 }}
-                          onClick={() => !showFeedback && setSelectedAnswer(option)}
-                          disabled={showFeedback}
-                          className={cn(
-                            "w-full text-left px-5 py-4 rounded-xl border-2 transition-all duration-200",
-                            "flex items-center gap-4",
-                            !showFeedback && isSelected && "border-primary bg-primary/5",
-                            !showFeedback && !isSelected && "border-border hover:border-primary/50 bg-background",
-                            showCorrect && "border-stable bg-stable/10",
-                            showIncorrect && "border-unstable bg-unstable/10",
-                            showFeedback && "cursor-default"
-                          )}
-                        >
-                          <span className={cn(
-                            "flex items-center justify-center h-8 w-8 rounded-full text-sm font-semibold border-2 transition-colors",
-                            !showFeedback && isSelected && "border-primary bg-primary text-primary-foreground",
-                            !showFeedback && !isSelected && "border-muted-foreground/30 text-muted-foreground",
-                            showCorrect && "border-stable bg-stable text-stable-foreground",
-                            showIncorrect && "border-unstable bg-unstable text-unstable-foreground"
-                          )}>
-                            {showCorrect ? <Check className="h-4 w-4" /> :
-                             showIncorrect ? <XIcon className="h-4 w-4" /> :
-                             String.fromCharCode(65 + index)}
-                          </span>
-                          <span className="flex-1 font-medium text-foreground">
-                            {option}
-                          </span>
-                        </motion.button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Feedback */}
-                  <AnimatePresence>
-                    {showFeedback && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: "auto" }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="mt-6 p-4 rounded-xl bg-muted/50 border border-border"
-                      >
-                        <p className={cn(
-                          "font-display font-medium mb-1",
-                          answers[currentIndex]?.isCorrect ? "text-stable" : "text-unstable"
-                        )}>
-                          {answers[currentIndex]?.isCorrect ? "Correct!" : "Not quite right"}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          {currentQuestion.explanation}
-                        </p>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </Card>
+                <ActivityCard
+                  revision={current.current}
+                  onAccepted={(status) => setAccepted(prev => ({ ...prev, [current.id]: status }))}
+                />
+                {current.current.sourceArtifactId && (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Source:{' '}
+                    <a className="underline" href={`/api/artifacts/${current.current.sourceArtifactId}/bytes`} target="_blank" rel="noreferrer">
+                      open the cited version
+                    </a>
+                  </p>
+                )}
               </motion.div>
             </AnimatePresence>
           </div>
         </div>
 
-        {/* Footer */}
         <footer className="flex items-center justify-between px-6 py-4 border-t border-border bg-card/50">
-          <Button
-            variant="ghost"
-            onClick={() => {
-              if (currentIndex > 0) {
-                setCurrentIndex(currentIndex - 1);
-                setSelectedAnswer(answers[currentIndex - 1]?.answer || null);
-                setShowFeedback(answers[currentIndex - 1] !== null);
-              }
-            }}
-            disabled={currentIndex === 0}
-          >
+          <Button variant="ghost" onClick={() => setCurrentIndex(currentIndex - 1)} disabled={currentIndex === 0}>
             <ChevronLeft className="h-4 w-4 mr-1" />
             Previous
           </Button>
@@ -543,46 +362,33 @@ export default function QuizPage() {
               </SheetHeader>
               <div className="flex-1 overflow-hidden">
                 <QuizAiChat
-                  questionPrompt={currentQuestion.prompt}
-                  questionOptions={currentQuestion.options}
-                  correctAnswer={currentQuestion.correctAnswer}
-                  explanation={currentQuestion.explanation}
-                  userAnswer={answers[currentIndex]?.answer}
-                  wasCorrect={answers[currentIndex]?.isCorrect}
+                  questionPrompt={current.current.prompt}
+                  questionOptions={current.current.options ?? undefined}
                 />
               </div>
             </SheetContent>
           </Sheet>
 
-          {!showFeedback ? (
-            <Button onClick={handleSubmit} disabled={!selectedAnswer}>
-              Check Answer
-            </Button>
-          ) : (
-            <Button onClick={handleNext}>
-              {currentIndex < filteredQuestions.length - 1 ? (
-                <>
-                  Next
-                  <ChevronRight className="h-4 w-4 ml-1" />
-                </>
-              ) : (
-                'See Results'
-              )}
-            </Button>
-          )}
+          <Button onClick={handleNext} disabled={!currentStatus}>
+            {currentIndex < filtered.length - 1 ? (
+              <>
+                Next
+                <ChevronRight className="h-4 w-4 ml-1" />
+              </>
+            ) : (
+              'See Results'
+            )}
+          </Button>
         </footer>
       </div>
 
-      {/* Quiz Config Modal */}
       <QuizConfigModal
         open={showConfigModal}
         onOpenChange={setShowConfigModal}
         config={quizConfig}
         onConfigChange={setQuizConfig}
-        onStartQuiz={handleStartQuiz}
-        availableCards={filteredQuestions.length}
-        dueCards={dueCards}
-        newCards={newCards}
+        onStartQuiz={() => { setShowConfigModal(false); setCurrentIndex(0); setIsComplete(false); }}
+        availableCards={filtered.length}
       />
     </AppLayout>
   );
