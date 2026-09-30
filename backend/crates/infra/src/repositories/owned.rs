@@ -57,6 +57,20 @@ pub async fn topic(pool: &PgPool, user_id: Uuid, topic_id: Option<Uuid>) -> Resu
     check("topic", &[id], n)
 }
 
+/// `resource_id`, if given, is a resource owned by `user_id`.
+pub async fn resource(pool: &PgPool, user_id: Uuid, resource_id: Option<Uuid>) -> Result<(), DomainError> {
+    let Some(id) = resource_id else { return Ok(()) };
+    let n = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM resources WHERE user_id = $1 AND id = $2"#,
+        user_id,
+        id,
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| DomainError::Repository(e.to_string()))?;
+    check("resource", &[id], n)
+}
+
 /// `ru_id`, if given, is a reinforcement unit whose concept `user_id` owns.
 pub async fn reinforcement_unit(pool: &PgPool, user_id: Uuid, ru_id: Option<Uuid>) -> Result<(), DomainError> {
     let Some(id) = ru_id else { return Ok(()) };
