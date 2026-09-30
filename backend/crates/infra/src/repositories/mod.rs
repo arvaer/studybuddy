@@ -1,3 +1,4 @@
+pub mod attempt;
 pub mod claim;
 pub mod concept;
 pub mod event;

@@ -1,6 +1,6 @@
 # Learning records
 
-Schema landed by issue #8 (migration `20240105000000_learning_records.sql`). The operation that writes these records is #9; idempotent submission is #10. Until those land, the existing quiz and question tables keep working and nothing reads these tables in production code.
+Schema landed by issue #8 (migration `20240105000000_learning_records.sql`); the recording operation by #9. Idempotent submission is #10 and authoring activities is #41. The existing quiz and question tables keep working until the frontend moves over (#13).
 
 ## Tables
 
@@ -26,4 +26,20 @@ Immutability is enforced by a `BEFORE UPDATE` trigger on the three record tables
 
 `activities.user_id` is the root. `attempts.user_id` is denormalised so predicates stay one join short; the recording operation (#9) must verify it equals the activity's owner. The schema does not enforce that equality, and the ownership convention in [ownership.md](ownership.md) applies.
 
-Tests: `backend/crates/infra/tests/learning_records_schema.rs`.
+## Recording an attempt (#9)
+
+`POST /api/attempts` with `{activityRevisionId, response, assistance?}`; `GET /api/attempts/{id}` returns the same receipt later. The receipt is `{attemptId, activityRevisionId, submittedAt, status, assessment}` where `status` is `pending`, `correct`, `partial` or `incorrect` and `assessment` is null while pending.
+
+One repository method, `AttemptRepository::record`, owns the transaction:
+
+1. Load the revision **through its activity's `user_id`**. Foreign or missing is `NotFound`, and nothing else runs.
+2. Apply `domain::learning::assess` to the revision and the response. A string answer key with options is a `choice` assessment (the response must be one of the options, else 422). A string key without options is `exact_match`, compared after trimming, case-folding and collapsing whitespace. Any other key shape, or none, yields no assessment.
+3. Insert the attempt with the response and the assistance list as given.
+4. Insert assessment revision 1 if step 2 produced one.
+5. Commit. A failure at any step leaves no attempt row.
+
+The rule in step 2 lives only in the domain crate; the adapter calls it and must not grade in SQL. Model and manual assessment methods are reserved in the enum for later work and are not produced by this operation.
+
+Tests: `backend/crates/infra/tests/learning_records_schema.rs` (schema) and `record_attempt.rs` (operation, including a forced failure after the attempt insert that proves rollback). The rule itself is unit-tested in `backend/crates/domain/src/learning.rs`.
+
+Not in this operation: the learner's review schedule is not updated. The old `POST /api/questions/{id}/answer` still mutates RU state directly; retiring it is part of the frontend cutover (#13) and deletion workstream.

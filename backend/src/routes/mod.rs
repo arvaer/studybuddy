@@ -1,5 +1,6 @@
 pub mod extractor;
 
+mod attempts;
 mod auth;
 mod concepts;
 mod health;
@@ -25,6 +26,7 @@ pub fn router() -> Router<AppState> {
         .nest(
             "/api",
             Router::new()
+                .merge(attempts::router())
                 .merge(topics::router())
                 .merge(concepts::router())
                 .merge(reinforcement_units::router())
