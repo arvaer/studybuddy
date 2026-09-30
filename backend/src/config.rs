@@ -31,6 +31,9 @@ pub struct Config {
     pub uploads_dir: PathBuf,
     /// `RUST_LOG`, default `lugia=debug,tower_http=debug`.
     pub log_filter: String,
+    /// `COOKIE_SECURE`, default true. Set to `false` only for plain-http
+    /// development where the browser refuses Secure cookies.
+    pub cookie_secure: bool,
     /// Server-owned model access, `None` when `LLM_PROVIDER` is unset.
     /// With a provider: `LLM_API_KEY` and `LLM_MODEL` are required;
     /// `LLM_BASE_URL` defaults per provider and its host must appear in
@@ -71,6 +74,7 @@ impl fmt::Debug for Config {
             .field("cors_origin", &self.cors_origin)
             .field("uploads_dir", &self.uploads_dir)
             .field("log_filter", &self.log_filter)
+            .field("cookie_secure", &self.cookie_secure)
             .field("llm", &self.llm)
             .finish()
     }
@@ -115,12 +119,21 @@ impl Config {
         let log_filter =
             get("RUST_LOG").unwrap_or_else(|| "lugia=debug,tower_http=debug".to_string());
 
+        let cookie_secure = match get("COOKIE_SECURE") {
+            None => true,
+            Some(v) => match v.trim().to_ascii_lowercase().as_str() {
+                "true" | "1" | "yes" => true,
+                "false" | "0" | "no" => false,
+                _ => return Err(ConfigError::Invalid("COOKIE_SECURE", "expected true or false")),
+            },
+        };
+
         let llm = match get("LLM_PROVIDER") {
             None => None,
             Some(name) => Some(Self::llm_settings(&get, &name)?),
         };
 
-        Ok(Self { database_url, jwt_secret, port, cors_origin, uploads_dir, log_filter, llm })
+        Ok(Self { database_url, jwt_secret, port, cors_origin, uploads_dir, log_filter, cookie_secure, llm })
     }
 
     fn llm_settings(
@@ -192,6 +205,15 @@ mod tests {
         assert_eq!(cfg.cors_origin, "http://localhost:8080");
         assert_eq!(cfg.uploads_dir, PathBuf::from("data/uploads"));
         assert_eq!(cfg.log_filter, "lugia=debug,tower_http=debug");
+        assert!(cfg.cookie_secure);
+    }
+
+    #[test]
+    fn cookie_secure_parses_and_rejects_garbage() {
+        let off = Config::from_lookup(env(&[BASE[0], BASE[1], ("COOKIE_SECURE", "false")])).unwrap();
+        assert!(!off.cookie_secure);
+        let err = Config::from_lookup(env(&[BASE[0], BASE[1], ("COOKIE_SECURE", "maybe")])).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid("COOKIE_SECURE", _)));
     }
 
     #[test]

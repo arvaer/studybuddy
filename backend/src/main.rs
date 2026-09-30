@@ -60,7 +60,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let port = config.port;
-    let state = AppState { pool, jwt_secret: config.jwt_secret, uploads_dir: config.uploads_dir, llm };
+    let state = AppState {
+        pool,
+        jwt_secret: config.jwt_secret,
+        uploads_dir: config.uploads_dir,
+        cookie_secure: config.cookie_secure,
+        llm,
+    };
 
     let app = Router::new()
         .merge(routes::router())

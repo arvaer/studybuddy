@@ -9,7 +9,7 @@ use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
 
 use app::dtos::auth::{LoginRequest, SignupRequest};
-use app::services::auth::AuthService;
+use app::services::auth::{AuthService, ACCESS_TOKEN_TTL_SECS, REFRESH_TOKEN_TTL_SECS};
 use infra::repositories::user::PgUserRepository;
 
 use crate::error::HttpError;
@@ -57,9 +57,10 @@ async fn logout(
     let raw    = jar.get("refresh_token").map(|c| c.value().to_string());
     svc.logout(raw.as_deref()).await?;
 
+    // A removal cookie must match the path the cookie was set with.
     let jar = jar
-        .remove(Cookie::from("access_token"))
-        .remove(Cookie::from("refresh_token"));
+        .remove(Cookie::build("access_token").path("/"))
+        .remove(Cookie::build("refresh_token").path(REFRESH_COOKIE_PATH));
 
     Ok((jar, Json(serde_json::json!({ "ok": true }))))
 }
@@ -101,22 +102,29 @@ fn make_service(state: &AppState) -> AuthService<PgUserRepository> {
     AuthService::new(repo, state.jwt_secret.clone())
 }
 
+/// The refresh cookie is only ever sent to the auth routes.
+const REFRESH_COOKIE_PATH: &str = "/api/auth";
+
 fn set_cookies(
     jar: CookieJar,
     access_token: &str,
     refresh_token: &str,
-    _state: &AppState,
+    state: &AppState,
 ) -> CookieJar {
     let access = Cookie::build(("access_token", access_token.to_string()))
         .http_only(true)
+        .secure(state.cookie_secure)
         .same_site(SameSite::Lax)
         .path("/")
+        .max_age(time::Duration::seconds(ACCESS_TOKEN_TTL_SECS))
         .build();
 
     let refresh = Cookie::build(("refresh_token", refresh_token.to_string()))
         .http_only(true)
+        .secure(state.cookie_secure)
         .same_site(SameSite::Lax)
-        .path("/api/auth")   // limit scope to auth endpoints
+        .path(REFRESH_COOKIE_PATH)
+        .max_age(time::Duration::seconds(REFRESH_TOKEN_TTL_SECS))
         .build();
 
     jar.add(access).add(refresh)

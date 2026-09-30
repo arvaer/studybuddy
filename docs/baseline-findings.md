@@ -15,7 +15,7 @@ Recorded 2026-09-29 while establishing the [development setup](development.md) f
 | --- | --- |
 | `backend/.env` is **tracked in git** and contains `JWT_SECRET` and `DATABASE_URL`. `.env` is not in `.gitignore`. | #5: untracked and ignored; the historical value must be rotated where deployed |
 | `JWT_SECRET` falls back to a known string when unset. | #5: startup now fails without it and refuses the old fallback value |
-| Request tracing logs full request URIs at DEBUG by default. | #7 |
+| Request tracing logs full request URIs at DEBUG by default. | #7: reviewed; URIs carry only record ids and headers/cookies are never logged. See docs/auth.md. |
 
 ## Quality (non-blocking)
 

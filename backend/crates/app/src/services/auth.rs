@@ -1,17 +1,23 @@
 use chrono::{Duration, Utc};
-use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
+use jsonwebtoken::{EncodingKey, Header, encode};
 use uuid::Uuid;
+use validator::Validate;
 
 use domain::repository_traits::UserRepository;
 
 use crate::dtos::auth::{AuthResponse, LoginRequest, SignupRequest, TokenClaims, UserResponse};
 use crate::errors::AppError;
 
+/// Lifetime of an access token (a stateless JWT; cannot be revoked early).
+pub const ACCESS_TOKEN_TTL_SECS: i64 = 15 * 60;
+/// Lifetime of a refresh token (stored hashed; revoked on logout and rotation).
+pub const REFRESH_TOKEN_TTL_SECS: i64 = 7 * 24 * 60 * 60;
+
 pub struct AuthService<R: UserRepository> {
     user_repo:     R,
     jwt_secret:    String,
-    access_expiry: Duration,  // e.g. 15 minutes
-    refresh_expiry: Duration, // e.g. 7 days
+    access_expiry: Duration,
+    refresh_expiry: Duration,
 }
 
 impl<R: UserRepository> AuthService<R> {
@@ -19,12 +25,13 @@ impl<R: UserRepository> AuthService<R> {
         Self {
             user_repo,
             jwt_secret,
-            access_expiry:  Duration::minutes(15),
-            refresh_expiry: Duration::days(7),
+            access_expiry:  Duration::seconds(ACCESS_TOKEN_TTL_SECS),
+            refresh_expiry: Duration::seconds(REFRESH_TOKEN_TTL_SECS),
         }
     }
 
     pub async fn signup(&self, req: SignupRequest) -> Result<(AuthResponse, String), AppError> {
+        req.validate().map_err(validation_error)?;
         let user = self
             .user_repo
             .create(&req.email, &req.password, &req.display_name)
@@ -48,6 +55,7 @@ impl<R: UserRepository> AuthService<R> {
     }
 
     pub async fn login(&self, req: LoginRequest) -> Result<(AuthResponse, String), AppError> {
+        req.validate().map_err(validation_error)?;
         let user = self
             .user_repo
             .verify_password(&req.email, &req.password)
@@ -97,17 +105,6 @@ impl<R: UserRepository> AuthService<R> {
         Ok((access_token, new_refresh_raw))
     }
 
-    pub fn verify_access_token(&self, token: &str) -> Result<Uuid, AppError> {
-        let key = DecodingKey::from_secret(self.jwt_secret.as_bytes());
-        let data = decode::<TokenClaims>(token, &key, &Validation::default())
-            .map_err(|e| AppError::Unauthorized(e.to_string()))?;
-
-        let user_id = Uuid::parse_str(&data.claims.sub)
-            .map_err(|_| AppError::Unauthorized("malformed token subject".into()))?;
-
-        Ok(user_id)
-    }
-
     // ─── Private helpers ────────────────────────────────────────────────────
 
     fn mint_access_token(&self, user_id: Uuid) -> Result<String, AppError> {
@@ -133,6 +130,22 @@ impl<R: UserRepository> AuthService<R> {
             s
         })
     }
+}
+
+/// Flatten validator output into one message. Field names only; never values.
+fn validation_error(errs: validator::ValidationErrors) -> AppError {
+    let mut parts: Vec<String> = errs
+        .field_errors()
+        .iter()
+        .flat_map(|(field, es)| {
+            es.iter().map(move |e| match &e.message {
+                Some(m) => m.to_string(),
+                None => format!("{field} is invalid"),
+            })
+        })
+        .collect();
+    parts.sort();
+    AppError::Validation(parts.join("; "))
 }
 
 fn sha256_hex(input: &str) -> String {
