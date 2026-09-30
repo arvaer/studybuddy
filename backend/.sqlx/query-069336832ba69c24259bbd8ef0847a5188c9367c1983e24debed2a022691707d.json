@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, concept_id, predicate, supporting_text, asset_id, source_location, introduced_at\n            FROM claims_in_context WHERE concept_id = $1\n            ORDER BY introduced_at ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "concept_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "predicate",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "supporting_text",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "asset_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "source_location",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "introduced_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "069336832ba69c24259bbd8ef0847a5188c9367c1983e24debed2a022691707d"
+}

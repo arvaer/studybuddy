@@ -83,41 +83,7 @@ Topics → Concepts → Reinforcement Units → Questions
 
 ## Running Locally
 
-### Prerequisites
-- Rust 1.75+ (rustc, cargo)
-- Node.js 18+ & Bun (or npm)
-- PostgreSQL 14+
-
-### Backend Setup
-```bash
-cd be
-
-# Set environment variables
-export DATABASE_URL="postgresql://user:pass@localhost/sb"
-export JWT_SECRET="your-secret-key"
-export OPENAI_API_KEY="your-openai-key"
-
-# Run migrations
-sqlx migrate run
-
-# Start server
-cargo run --release
-```
-
-Server runs on `http://localhost:3000`
-
-### Frontend Setup
-```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Start dev server
-npm run dev
-```
-
-Frontend runs on `http://localhost:8080`
+See [docs/development.md](docs/development.md) for the verified setup: a disposable PostgreSQL container, backend environment variables, SQLx offline cache, and the frontend commands. Pre-existing problems are listed in [docs/baseline-findings.md](docs/baseline-findings.md).
 
 ## API Overview
 

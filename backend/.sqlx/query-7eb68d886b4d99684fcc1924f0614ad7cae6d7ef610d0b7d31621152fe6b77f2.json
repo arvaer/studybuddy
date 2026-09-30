@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                ru.id, ru.concept_id, ru.claim, ru.context, ru.state::TEXT AS state,\n                ru.stability_score, ru.reinforcement_count, ru.last_reinforced,\n                ru.ease_factor, ru.interval_days, ru.due_at, ru.created_at,\n                COALESCE(\n                    array_agg(rd.depends_on_id) FILTER (WHERE rd.depends_on_id IS NOT NULL),\n                    '{}'\n                ) AS \"dependencies!\"\n            FROM reinforcement_units ru\n            LEFT JOIN ru_dependencies rd ON rd.ru_id = ru.id\n            WHERE ru.id = $1\n            GROUP BY ru.id\n            ",
+  "query": "\n            SELECT\n                ru.id, ru.concept_id, ru.claim, ru.context,\n                ru.claim_id, ru.dependency_cost,\n                ru.state::TEXT AS state,\n                ru.stability_score, ru.reinforcement_count, ru.last_reinforced,\n                ru.ease_factor, ru.interval_days, ru.due_at, ru.source_resource_id, ru.created_at,\n                COALESCE(\n                    array_agg(rd.depends_on_id) FILTER (WHERE rd.depends_on_id IS NOT NULL),\n                    '{}'\n                ) AS \"dependencies!\"\n            FROM reinforcement_units ru\n            LEFT JOIN ru_dependencies rd ON rd.ru_id = ru.id\n            WHERE ru.id = $1\n            GROUP BY ru.id\n            ",
   "describe": {
     "columns": [
       {
@@ -25,46 +25,61 @@
       },
       {
         "ordinal": 4,
-        "name": "state",
-        "type_info": "Text"
+        "name": "claim_id",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 5,
-        "name": "stability_score",
+        "name": "dependency_cost",
         "type_info": "Float8"
       },
       {
         "ordinal": 6,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "stability_score",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 8,
         "name": "reinforcement_count",
         "type_info": "Int4"
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "last_reinforced",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 10,
         "name": "ease_factor",
         "type_info": "Float8"
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "interval_days",
         "type_info": "Int4"
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "due_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
+        "name": "source_resource_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 14,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 12,
+        "ordinal": 15,
         "name": "dependencies!",
         "type_info": "UuidArray"
       }
@@ -79,6 +94,8 @@
       false,
       false,
       false,
+      true,
+      false,
       null,
       false,
       false,
@@ -86,9 +103,10 @@
       false,
       false,
       false,
+      true,
       false,
       null
     ]
   },
-  "hash": "ec0ba20ede6ceedc2d61e686acd1ba8ea00430ea5221561a45c82aec9ac16a64"
+  "hash": "7eb68d886b4d99684fcc1924f0614ad7cae6d7ef610d0b7d31621152fe6b77f2"
 }

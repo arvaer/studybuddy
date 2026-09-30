@@ -1,0 +1,77 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, event_type, schema_version, emitted_at, producer, user_id,\n                   aggregate_type, aggregate_id, sequence, payload\n            FROM events\n            WHERE aggregate_type = $1 AND aggregate_id = $2\n            ORDER BY sequence ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "event_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "schema_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "emitted_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "producer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "aggregate_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "aggregate_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "sequence",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "payload",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "35e0205468ed8e384282ce9e66e1d49cd1e8531a7b0f33c54b51fbe9e95bd846"
+}
