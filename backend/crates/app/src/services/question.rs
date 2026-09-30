@@ -36,12 +36,16 @@ impl<Q: QuestionRepository, R: ReinforcementUnitRepository> QuestionService<Q, R
     }
 
     /// Submit an answer, evaluate correctness, and advance the RU state via SM-2.
+    ///
+    /// The question must belong to `user_id`; the ownership check happens in
+    /// the lookup, before any review state is read or mutated.
     pub async fn submit_answer(
         &self,
+        user_id: Uuid,
         question_id: Uuid,
         req: AnswerRequest,
     ) -> Result<AnswerResponse, AppError> {
-        let question = self.question_repo.find_by_id(question_id).await?;
+        let question = self.question_repo.find_owned(question_id, user_id).await?;
 
         let is_correct = question.correct_answer.trim().to_lowercase()
             == req.answer.trim().to_lowercase();

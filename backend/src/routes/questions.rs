@@ -52,7 +52,7 @@ async fn list(
 
 async fn answer(
     State(state): State<AppState>,
-    AuthUser(_user_id): AuthUser,
+    AuthUser(user_id): AuthUser,
     Path(id): Path<Uuid>,
     Json(req): Json<AnswerRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
@@ -60,5 +60,5 @@ async fn answer(
         PgQuestionRepository::new(state.pool.clone()),
         PgRuRepository::new(state.pool),
     );
-    Ok(Json(svc.submit_answer(id, req).await?))
+    Ok(Json(svc.submit_answer(user_id, id, req).await?))
 }
