@@ -465,15 +465,19 @@ pub trait ProgressRepository: Send + Sync {
 
 // ─── AttemptRepository ───────────────────────────────────────────────────────
 
-/// The one operation that records learning evidence (#9). The adapter owns
-/// the transaction: it verifies the revision belongs to the caller, inserts
-/// the attempt, applies `learning::assess`, inserts the assessment if there
-/// is one, and commits all of it or none of it.
+/// The one operation that records learning evidence (#9, #10). The adapter
+/// owns the transaction: it verifies the revision belongs to the caller,
+/// applies `learning::assess`, inserts the attempt and its assessment if
+/// there is one, and commits all of it or none of it.
+///
+/// A request key already recorded by this learner replays that receipt
+/// when `RecordAttempt::same_payload` holds and is `Conflict` otherwise;
+/// neither path writes anything. Concurrent duplicates resolve the same way.
 pub trait AttemptRepository: Send + Sync {
     fn record(
         &self,
         cmd: crate::learning::RecordAttempt,
-    ) -> impl std::future::Future<Output = Result<crate::learning::AttemptReceipt, DomainError>> + Send;
+    ) -> impl std::future::Future<Output = Result<crate::learning::Recorded, DomainError>> + Send;
 
     /// The receipt for an attempt the caller owns; foreign is `NotFound`.
     fn find_receipt(

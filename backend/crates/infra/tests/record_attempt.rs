@@ -39,7 +39,12 @@ async fn revision(pool: &PgPool, user_id: Uuid, options: Option<Value>, answer_k
 }
 
 fn req(revision_id: Uuid, response: Value) -> RecordAttemptRequest {
-    RecordAttemptRequest { activity_revision_id: revision_id, response, assistance: vec![] }
+    RecordAttemptRequest {
+        request_key: Uuid::new_v4().to_string(),
+        activity_revision_id: revision_id,
+        response,
+        assistance: vec![],
+    }
 }
 
 async fn count(pool: &PgPool, table: &str) -> i64 {
@@ -52,7 +57,7 @@ async fn keyed_activity_is_assessed_in_the_same_operation(pool: PgPool) {
     let rev = revision(&pool, u, None, Some(json!("a mapping from states to actions"))).await;
     let svc = AttemptService::new(PgAttemptRepository::new(pool.clone()));
 
-    let receipt = svc.record(u, req(rev, json!("A mapping from states to actions"))).await.unwrap();
+    let receipt = svc.record(u, req(rev, json!("A mapping from states to actions"))).await.unwrap().receipt;
 
     assert_eq!(receipt.status, "correct");
     let a = receipt.assessment.unwrap();
@@ -72,7 +77,7 @@ async fn choice_activity_wrong_option_is_incorrect(pool: PgPool) {
     let rev = revision(&pool, u, Some(json!(["Reward", "Value"])), Some(json!("Value"))).await;
     let svc = AttemptService::new(PgAttemptRepository::new(pool.clone()));
 
-    let receipt = svc.record(u, req(rev, json!("Reward"))).await.unwrap();
+    let receipt = svc.record(u, req(rev, json!("Reward"))).await.unwrap().receipt;
 
     assert_eq!(receipt.status, "incorrect");
     assert_eq!(receipt.assessment.unwrap().method, AssessmentMethod::Choice);
@@ -86,12 +91,14 @@ async fn unkeyed_activity_stays_pending_with_assistance_recorded(pool: PgPool) {
 
     let receipt = svc
         .record(u, RecordAttemptRequest {
+            request_key: "k1".into(),
             activity_revision_id: rev,
             response: json!("Because a smaller reward now can lead to larger rewards later."),
             assistance: vec![json!({"kind": "hint", "n": 1})],
         })
         .await
-        .unwrap();
+        .unwrap()
+        .receipt;
 
     assert_eq!(receipt.status, "pending");
     assert!(receipt.assessment.is_none());
@@ -119,7 +126,7 @@ async fn foreign_revision_is_not_found_and_nothing_is_written(pool: PgPool) {
     assert_eq!(count(&pool, "attempts").await, 0);
 
     // And B cannot read A's receipt once one exists.
-    let mine = svc.record(a, req(rev_a, json!("x"))).await.unwrap();
+    let mine = svc.record(a, req(rev_a, json!("x"))).await.unwrap().receipt;
     let peek = svc.get(b, mine.attempt_id.parse().unwrap()).await;
     assert!(matches!(peek, Err(AppError::Domain(DomainError::NotFound(_)))));
 }

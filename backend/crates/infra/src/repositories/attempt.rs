@@ -1,11 +1,12 @@
-//! Transactional recording of attempts (#9). See docs/learning-records.md.
+//! Transactional recording of attempts (#9) with idempotent submission by
+//! request key (#10). See docs/learning-records.md.
 
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
 use domain::errors::DomainError;
 use domain::learning::{
-    self, ActivityRevision, Assessment, AssessmentMethod, AssessmentOutcome, AttemptReceipt, RecordAttempt,
+    self, ActivityRevision, Assessment, AssessmentMethod, AssessmentOutcome, AttemptReceipt, RecordAttempt, Recorded,
 };
 use domain::repository_traits::AttemptRepository;
 
@@ -24,11 +25,90 @@ fn db(e: sqlx::Error) -> DomainError {
     DomainError::Repository(e.to_string())
 }
 
+impl PgAttemptRepository {
+    /// The idempotency check (#10). If this learner already recorded
+    /// `cmd.request_key`, replay that receipt when the payload is identical
+    /// and refuse with `Conflict` otherwise. `None` means the key is unused.
+    ///
+    /// Everything runs on the one connection passed in. Acquiring a second
+    /// one here while the caller holds a transaction would exhaust the pool
+    /// under concurrent duplicates.
+    async fn replay(conn: &mut PgConnection, cmd: &RecordAttempt) -> Result<Option<Recorded>, DomainError> {
+        let existing = sqlx::query!(
+            r#"
+            SELECT id, activity_revision_id, response, assistance
+            FROM attempts
+            WHERE user_id = $1 AND request_key = $2
+            "#,
+            cmd.user_id,
+            cmd.request_key,
+        )
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(db)?;
+
+        let Some(existing) = existing else { return Ok(None) };
+        if !cmd.same_payload(existing.activity_revision_id, &existing.response, &existing.assistance) {
+            return Err(DomainError::Conflict(
+                "request key was already used for a different submission".into(),
+            ));
+        }
+        let receipt = receipt(conn, existing.id, cmd.user_id).await?;
+        Ok(Some(Recorded { receipt, replayed: true }))
+    }
+}
+
+/// The owner-scoped receipt read, on whichever connection the caller holds.
+async fn receipt(conn: &mut PgConnection, attempt_id: Uuid, user_id: Uuid) -> Result<AttemptReceipt, DomainError> {
+    let row = sqlx::query!(
+        r#"
+        SELECT a.id, a.activity_revision_id, a.submitted_at,
+               s.outcome::TEXT AS "outcome?", s.method::TEXT AS "method?",
+               s.score AS "score?", s.feedback AS "feedback?"
+        FROM attempts a
+        LEFT JOIN LATERAL (
+            SELECT outcome, method, score, feedback FROM assessments
+            WHERE attempt_id = a.id ORDER BY revision DESC LIMIT 1
+        ) s ON true
+        WHERE a.id = $1 AND a.user_id = $2
+        "#,
+        attempt_id,
+        user_id,
+    )
+    .fetch_optional(conn)
+    .await
+    .map_err(db)?
+    .ok_or_else(|| DomainError::NotFound(format!("attempt {attempt_id}")))?;
+
+    let assessment = match (row.outcome, row.method) {
+        (Some(o), Some(m)) => Some(Assessment {
+            outcome:  AssessmentOutcome::parse(&o).ok_or_else(|| DomainError::Repository(format!("unknown outcome {o}")))?,
+            method:   AssessmentMethod::parse(&m).ok_or_else(|| DomainError::Repository(format!("unknown method {m}")))?,
+            score:    row.score,
+            feedback: row.feedback.unwrap_or_default(),
+        }),
+        _ => None,
+    };
+
+    Ok(AttemptReceipt {
+        attempt_id:           row.id,
+        activity_revision_id: row.activity_revision_id,
+        submitted_at:         row.submitted_at,
+        assessment,
+    })
+}
+
 impl AttemptRepository for PgAttemptRepository {
-    async fn record(&self, cmd: RecordAttempt) -> Result<AttemptReceipt, DomainError> {
+    async fn record(&self, cmd: RecordAttempt) -> Result<Recorded, DomainError> {
         let mut tx = self.pool.begin().await.map_err(db)?;
 
-        // Ownership predicate first: a foreign or missing revision is NotFound
+        // A resent request key answers from the record before anything else
+        // is checked or written.
+        if let Some(replayed) = Self::replay(&mut tx, &cmd).await? {
+            return Ok(replayed);
+        }
+
+        // Ownership predicate next: a foreign or missing revision is NotFound
         // and nothing below runs.
         let row = sqlx::query!(
             r#"
@@ -61,20 +141,33 @@ impl AttemptRepository for PgAttemptRepository {
         // costs nothing to roll back.
         let assessment = learning::assess(&revision, &cmd.response)?;
 
+        // `ON CONFLICT DO NOTHING` on the per-learner request-key index is
+        // what makes concurrent duplicates safe: the second writer waits for
+        // the first to commit, gets no row back, and replays instead.
         let attempt = sqlx::query!(
             r#"
-            INSERT INTO attempts (user_id, activity_revision_id, response, assistance)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO attempts (user_id, request_key, activity_revision_id, response, assistance)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (user_id, request_key) WHERE request_key IS NOT NULL DO NOTHING
             RETURNING id, submitted_at
             "#,
             cmd.user_id,
+            cmd.request_key,
             revision.id,
             cmd.response,
-            serde_json::Value::Array(cmd.assistance),
+            serde_json::Value::Array(cmd.assistance.clone()),
         )
-        .fetch_one(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(db)?;
+
+        let Some(attempt) = attempt else {
+            drop(tx); // rolls back; nothing of ours was written
+            let mut conn = self.pool.acquire().await.map_err(db)?;
+            return Self::replay(&mut conn, &cmd).await?.ok_or_else(|| {
+                DomainError::Repository(format!("request key {} vanished during insert", cmd.request_key))
+            });
+        };
 
         if let Some(a) = &assessment {
             sqlx::query!(
@@ -95,52 +188,19 @@ impl AttemptRepository for PgAttemptRepository {
 
         tx.commit().await.map_err(db)?;
 
-        Ok(AttemptReceipt {
-            attempt_id:           attempt.id,
-            activity_revision_id: revision.id,
-            submitted_at:         attempt.submitted_at,
-            assessment,
+        Ok(Recorded {
+            receipt:  AttemptReceipt {
+                attempt_id:           attempt.id,
+                activity_revision_id: revision.id,
+                submitted_at:         attempt.submitted_at,
+                assessment,
+            },
+            replayed: false,
         })
     }
 
     async fn find_receipt(&self, attempt_id: Uuid, user_id: Uuid) -> Result<AttemptReceipt, DomainError> {
-        let row = sqlx::query!(
-            r#"
-            SELECT a.id, a.activity_revision_id, a.submitted_at,
-                   s.outcome::TEXT AS "outcome?", s.method::TEXT AS "method?",
-                   s.score AS "score?", s.feedback AS "feedback?"
-            FROM attempts a
-            LEFT JOIN LATERAL (
-                SELECT outcome, method, score, feedback FROM assessments
-                WHERE attempt_id = a.id ORDER BY revision DESC LIMIT 1
-            ) s ON true
-            WHERE a.id = $1 AND a.user_id = $2
-            "#,
-            attempt_id,
-            user_id,
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(db)?
-        .ok_or_else(|| DomainError::NotFound(format!("attempt {attempt_id}")))?;
-
-        let assessment = match (row.outcome, row.method) {
-            (Some(o), Some(m)) => Some(Assessment {
-                outcome:  AssessmentOutcome::parse(&o)
-                    .ok_or_else(|| DomainError::Repository(format!("unknown outcome {o}")))?,
-                method:   AssessmentMethod::parse(&m)
-                    .ok_or_else(|| DomainError::Repository(format!("unknown method {m}")))?,
-                score:    row.score,
-                feedback: row.feedback.unwrap_or_default(),
-            }),
-            _ => None,
-        };
-
-        Ok(AttemptReceipt {
-            attempt_id:           row.id,
-            activity_revision_id: row.activity_revision_id,
-            submitted_at:         row.submitted_at,
-            assessment,
-        })
+        let mut conn = self.pool.acquire().await.map_err(db)?;
+        receipt(&mut conn, attempt_id, user_id).await
     }
 }
