@@ -25,20 +25,22 @@ export DATABASE_URL="$(scripts/dev-db.sh url)"
 
 ## 2. Backend
 
-Configuration is read from the environment (and from `backend/.env` via dotenvy if present):
+Configuration is read once at startup by `backend/src/config.rs`, which is the single list of every variable the backend uses. `backend/.env` is loaded first via dotenvy if present; it is gitignored, and `backend/.env.example` shows the shape. A required variable that is unset or blank stops startup with an error naming the variable. Error messages and logs never contain a value.
 
 | Variable | Required | Default |
 | --- | --- | --- |
-| `DATABASE_URL` | yes | none; startup panics without it |
-| `JWT_SECRET` | **should be** | falls back to a known string (tracked as a hardening finding) |
+| `DATABASE_URL` | yes | none |
+| `JWT_SECRET` | yes | none; the retired fallback `dev-secret-change-in-production` is refused because it was once committed |
 | `PORT` | no | `3000` |
 | `CORS_ORIGIN` | no | `http://localhost:8080` |
 | `UPLOADS_DIR` | no | `data/uploads` (relative to the working directory) |
 | `RUST_LOG` | no | `lugia=debug,tower_http=debug` |
 
+Generate a local secret with `openssl rand -base64 48`. A `backend/.env` existed in git history before issue #5; treat any value from it as public and rotate it wherever it was deployed.
+
 ```sh
 cd backend
-export JWT_SECRET=dev-only-not-a-secret
+export JWT_SECRET="$(openssl rand -base64 48)"   # or put it in backend/.env
 cargo build            # compiles SQLx queries against $DATABASE_URL
 cargo test --workspace
 cargo run              # listens on 0.0.0.0:3000

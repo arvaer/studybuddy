@@ -66,9 +66,7 @@ async fn upload(
     AuthUser(user_id): AuthUser,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, HttpError> {
-    let uploads_dir = std::path::PathBuf::from(
-        std::env::var("UPLOADS_DIR").unwrap_or_else(|_| "data/uploads".to_string()),
-    );
+    let uploads_dir = state.uploads_dir.clone();
 
     let mut filename = String::new();
     let mut bytes = Vec::new();

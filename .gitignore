@@ -23,3 +23,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local environment files (backend/.env is loaded by dotenvy). Never commit secrets.
+.env
+.env.*
+!.env.example
