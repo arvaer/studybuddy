@@ -76,7 +76,7 @@ impl ResourceRepository for PgResourceRepository {
             INSERT INTO resources (user_id, topic_id, title, resource_type, url)
             VALUES ($1, $2, $3, $4::resource_type, $5)
             RETURNING id, user_id, topic_id, title, resource_type::TEXT AS resource_type,
-                      url, file_path, content_text, content_pages, added_at
+                      url, artifact_id, file_path, content_text, content_pages, added_at
             "#,
         )
         .bind(user_id)
@@ -95,6 +95,7 @@ impl ResourceRepository for PgResourceRepository {
         let row_title: String          = row.try_get("title").map_err(|e| DomainError::Repository(e.to_string()))?;
         let row_rt: Option<String>     = row.try_get("resource_type").map_err(|e| DomainError::Repository(e.to_string()))?;
         let row_url: Option<String>    = row.try_get("url").map_err(|e| DomainError::Repository(e.to_string()))?;
+        let row_art: Option<Uuid>      = row.try_get("artifact_id").map_err(|e| DomainError::Repository(e.to_string()))?;
         let row_fp: Option<String>     = row.try_get("file_path").map_err(|e| DomainError::Repository(e.to_string()))?;
         let row_ct: Option<String>     = row.try_get("content_text").map_err(|e| DomainError::Repository(e.to_string()))?;
         let row_cp: Option<serde_json::Value> = row.try_get("content_pages").map_err(|e| DomainError::Repository(e.to_string()))?;
@@ -111,6 +112,7 @@ impl ResourceRepository for PgResourceRepository {
             title:         row_title,
             resource_type: ResourceType::try_from(row_rt.as_deref().unwrap_or("article"))?,
             url:           row_url,
+            artifact_id:   row_art,
             file_path:     row_fp,
             content_text:  row_ct,
             content_pages,
@@ -126,6 +128,7 @@ impl ResourceRepository for PgResourceRepository {
         topic_id: Uuid,
         title: &str,
         resource_type: &str,
+        artifact_id: Uuid,
         file_path: &str,
         content_text: &str,
         content_pages: &[String],
@@ -139,16 +142,17 @@ impl ResourceRepository for PgResourceRepository {
 
         let row = sqlx::query(
             r#"
-            INSERT INTO resources (user_id, topic_id, title, resource_type, file_path, content_text, content_pages)
-            VALUES ($1, $2, $3, $4::resource_type, $5, $6, $7)
+            INSERT INTO resources (user_id, topic_id, title, resource_type, artifact_id, file_path, content_text, content_pages)
+            VALUES ($1, $2, $3, $4::resource_type, $5, $6, $7, $8)
             RETURNING id, user_id, topic_id, title, resource_type::TEXT AS resource_type,
-                      url, file_path, content_text, content_pages, added_at
+                      url, artifact_id, file_path, content_text, content_pages, added_at
             "#,
         )
         .bind(user_id)
         .bind(topic_id)
         .bind(title)
         .bind(resource_type)
+        .bind(artifact_id)
         .bind(file_path)
         .bind(content_text)
         .bind(&pages_json)
@@ -163,6 +167,7 @@ impl ResourceRepository for PgResourceRepository {
         let row_title: String          = row.try_get("title").map_err(|e| DomainError::Repository(e.to_string()))?;
         let row_rt: Option<String>     = row.try_get("resource_type").map_err(|e| DomainError::Repository(e.to_string()))?;
         let row_url: Option<String>    = row.try_get("url").map_err(|e| DomainError::Repository(e.to_string()))?;
+        let row_art: Option<Uuid>      = row.try_get("artifact_id").map_err(|e| DomainError::Repository(e.to_string()))?;
         let row_fp: Option<String>     = row.try_get("file_path").map_err(|e| DomainError::Repository(e.to_string()))?;
         let row_ct: Option<String>     = row.try_get("content_text").map_err(|e| DomainError::Repository(e.to_string()))?;
         let row_cp: Option<serde_json::Value> = row.try_get("content_pages").map_err(|e| DomainError::Repository(e.to_string()))?;
@@ -179,6 +184,7 @@ impl ResourceRepository for PgResourceRepository {
             title:         row_title,
             resource_type: ResourceType::try_from(row_rt.as_deref().unwrap_or("article"))?,
             url:           row_url,
+            artifact_id:   row_art,
             file_path:     row_fp,
             content_text:  row_ct,
             content_pages,
@@ -240,7 +246,7 @@ impl ResourceRepository for PgResourceRepository {
         let row = sqlx::query!(
             r#"
             SELECT id, user_id, topic_id, title, resource_type::TEXT AS resource_type,
-                   url, file_path, content_text, content_pages, added_at
+                   url, artifact_id, file_path, content_text, content_pages, added_at
             FROM resources WHERE id = $1 AND user_id = $2
             "#,
             id,
@@ -261,6 +267,7 @@ impl ResourceRepository for PgResourceRepository {
             title:         row.title,
             resource_type: ResourceType::try_from(row.resource_type.as_deref().unwrap_or("article"))?,
             url:           row.url,
+            artifact_id:   row.artifact_id,
             file_path:     row.file_path,
             content_text:  row.content_text,
             content_pages,
@@ -280,7 +287,7 @@ impl ResourceRepository for PgResourceRepository {
         let rows = sqlx::query!(
             r#"
             SELECT DISTINCT r.id, r.user_id, r.topic_id, r.title,
-                   r.resource_type::TEXT AS resource_type, r.url,
+                   r.resource_type::TEXT AS resource_type, r.url, r.artifact_id,
                    r.file_path, r.content_text, r.content_pages, r.added_at
             FROM resources r
             LEFT JOIN resource_concepts rc ON rc.resource_id = r.id
@@ -310,6 +317,7 @@ impl ResourceRepository for PgResourceRepository {
                 title:         r.title,
                 resource_type: ResourceType::try_from(r.resource_type.as_deref().unwrap_or("article"))?,
                 url:           r.url,
+                artifact_id:   r.artifact_id,
                 file_path:     r.file_path,
                 content_text:  r.content_text,
                 content_pages,

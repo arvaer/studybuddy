@@ -1,6 +1,7 @@
 pub mod extractor;
 
 mod activities;
+mod artifacts;
 mod attempts;
 mod auth;
 mod concepts;
@@ -28,6 +29,7 @@ pub fn router() -> Router<AppState> {
             "/api",
             Router::new()
                 .merge(activities::router())
+                .merge(artifacts::router())
                 .merge(attempts::router())
                 .merge(topics::router())
                 .merge(concepts::router())

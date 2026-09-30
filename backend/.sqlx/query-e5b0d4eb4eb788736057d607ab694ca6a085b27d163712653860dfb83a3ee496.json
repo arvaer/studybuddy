@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, user_id, topic_id, title, resource_type::TEXT AS resource_type,\n                   url, file_path, content_text, content_pages, added_at\n            FROM resources WHERE id = $1 AND user_id = $2\n            ",
+  "query": "\n            SELECT DISTINCT r.id, r.user_id, r.topic_id, r.title,\n                   r.resource_type::TEXT AS resource_type, r.url, r.artifact_id,\n                   r.file_path, r.content_text, r.content_pages, r.added_at\n            FROM resources r\n            LEFT JOIN resource_concepts rc ON rc.resource_id = r.id\n            WHERE r.user_id = $1\n              AND ($2::uuid IS NULL OR r.topic_id = $2)\n              AND ($3::uuid IS NULL OR rc.concept_id = $3)\n              AND ($4::TEXT IS NULL OR r.resource_type::TEXT = $4)\n            ORDER BY r.added_at DESC\n            ",
   "describe": {
     "columns": [
       {
@@ -35,21 +35,26 @@
       },
       {
         "ordinal": 6,
+        "name": "artifact_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
         "name": "file_path",
         "type_info": "Text"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "content_text",
         "type_info": "Text"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "content_pages",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "added_at",
         "type_info": "Timestamptz"
       }
@@ -57,7 +62,9 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid"
+        "Uuid",
+        "Uuid",
+        "Text"
       ]
     },
     "nullable": [
@@ -70,8 +77,9 @@
       true,
       true,
       true,
+      true,
       false
     ]
   },
-  "hash": "7f5a60bf63097d01ca65dc155b0ca9e87096dcfcc1aafa76fa4a705745c2daa4"
+  "hash": "e5b0d4eb4eb788736057d607ab694ca6a085b27d163712653860dfb83a3ee496"
 }

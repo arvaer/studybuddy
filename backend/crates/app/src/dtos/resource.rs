@@ -23,6 +23,7 @@ pub struct ResourceResponse {
     #[serde(rename = "type")]
     pub resource_type: String,
     pub url:           Option<String>,
+    pub artifact_id:   Option<String>,
     pub file_path:     Option<String>,
     pub content_text:  Option<String>,
     pub page_count:    i32,
@@ -38,6 +39,7 @@ impl From<Resource> for ResourceResponse {
             title:         r.title,
             resource_type: r.resource_type.to_string(),
             url:           r.url,
+            artifact_id:   r.artifact_id.map(|u| u.to_string()),
             file_path:     r.file_path,
             content_text:  r.content_text,
             page_count:    r.page_count,

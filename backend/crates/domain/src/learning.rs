@@ -63,6 +63,9 @@ pub struct ActivityRevision {
     pub answer_key:         Option<Value>,
     pub rubric:             Option<String>,
     pub source_resource_id: Option<Uuid>,
+    /// The exact upload the source resource had when this revision was
+    /// authored (#11). Copied by the adapter; never supplied by the client.
+    pub source_artifact_id: Option<Uuid>,
     pub source_location:    Option<Value>,
     pub created_at:         DateTime<Utc>,
 }
@@ -313,6 +316,7 @@ mod tests {
             answer_key,
             rubric: None,
             source_resource_id: None,
+            source_artifact_id: None,
             source_location: None,
             created_at: Utc::now(),
         }

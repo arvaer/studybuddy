@@ -13,6 +13,7 @@ use app::errors::AppError;
 use app::services::resource::ResourceService;
 use app::services::upload::UploadService;
 use domain::repository_traits::ResourceRepository;
+use infra::repositories::artifact::PgArtifactRepository;
 use infra::repositories::resource::PgResourceRepository;
 
 use crate::error::HttpError;
@@ -69,6 +70,7 @@ async fn upload(
     let uploads_dir = state.uploads_dir.clone();
 
     let mut filename = String::new();
+    let mut content_type = String::new();
     let mut bytes = Vec::new();
     let mut topic_id_str = String::new();
     let mut title = String::new();
@@ -83,6 +85,7 @@ async fn upload(
         match name.as_str() {
             "file" => {
                 filename = field.file_name().unwrap_or("upload").to_string();
+                content_type = field.content_type().unwrap_or("").to_string();
                 bytes = field
                     .bytes()
                     .await
@@ -129,9 +132,17 @@ async fn upload(
             .to_string();
     }
 
-    let svc = UploadService::new(PgResourceRepository::new(state.pool), uploads_dir);
+    if content_type.is_empty() {
+        content_type = if is_pdf { "application/pdf" } else { "text/plain" }.to_string();
+    }
+
+    let svc = UploadService::new(
+        PgResourceRepository::new(state.pool.clone()),
+        PgArtifactRepository::new(state.pool),
+        uploads_dir,
+    );
     let resp = svc
-        .upload(user_id, topic_id, title, filename, &bytes, content_text, content_pages, resource_type, concept_uuids)
+        .upload(user_id, topic_id, title, filename, &content_type, &bytes, content_text, content_pages, resource_type, concept_uuids)
         .await?;
 
     Ok((axum::http::StatusCode::CREATED, Json(resp)))
@@ -142,11 +153,11 @@ async fn get_content(
     AuthUser(user_id): AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let svc = UploadService::new(
-        PgResourceRepository::new(state.pool),
-        std::path::PathBuf::from("data/uploads"), // not used for get_content
-    );
-    let text = svc.get_content(id, user_id).await?;
+    let text = PgResourceRepository::new(state.pool)
+        .get_content_text(id, user_id)
+        .await
+        .map_err(HttpError::from)?
+        .unwrap_or_default();
     Ok(Json(serde_json::json!({ "text": text })))
 }
 

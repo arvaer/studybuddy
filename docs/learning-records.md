@@ -20,7 +20,7 @@ Immutability is enforced by a `BEFORE UPDATE` trigger on the three record tables
 - **Pending is not incorrect.** An attempt has no correctness column. Until an assessment row exists it is `pending`, and the view says so explicitly. This replaces the old `quiz_answers.is_correct = false` write.
 - **A correction is a new assessment revision.** The original judgement stays; the view reports the latest one.
 - **Request keys are per learner.** A partial unique index on `(user_id, request_key)` is the constraint idempotent submission (#10) relies on.
-- **Source link.** A revision may point at a `resources` row and a JSON `source_location`. When #12 introduces content-addressed artifacts, the revision gains an artifact address; nothing here needs to change for that.
+- **Source link.** A revision may point at a `resources` row and a JSON `source_location`. Since #11 it also carries `source_artifact_id`, the exact upload the resource had when the revision was authored; see [artifacts.md](artifacts.md).
 
 ## Ownership
 
