@@ -6,8 +6,12 @@
 
 use std::fmt;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use http::HeaderValue;
+use reqwest::Url;
+
+use crate::llm::{LlmProvider, LlmSettings};
 
 /// The value of `JWT_SECRET` that older builds silently fell back to. It was
 /// committed to the repository, so it is public and refused as a real secret.
@@ -27,7 +31,15 @@ pub struct Config {
     pub uploads_dir: PathBuf,
     /// `RUST_LOG`, default `lugia=debug,tower_http=debug`.
     pub log_filter: String,
+    /// Server-owned model access, `None` when `LLM_PROVIDER` is unset.
+    /// With a provider: `LLM_API_KEY` and `LLM_MODEL` are required;
+    /// `LLM_BASE_URL` defaults per provider and its host must appear in
+    /// `LLM_ALLOWED_HOSTS` (default `api.anthropic.com,api.openai.com`);
+    /// `LLM_TIMEOUT_SECS` defaults to 30.
+    pub llm: Option<LlmSettings>,
 }
+
+const DEFAULT_LLM_ALLOWED_HOSTS: &str = "api.anthropic.com,api.openai.com";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ConfigError {
@@ -59,6 +71,7 @@ impl fmt::Debug for Config {
             .field("cors_origin", &self.cors_origin)
             .field("uploads_dir", &self.uploads_dir)
             .field("log_filter", &self.log_filter)
+            .field("llm", &self.llm)
             .finish()
     }
 }
@@ -102,7 +115,59 @@ impl Config {
         let log_filter =
             get("RUST_LOG").unwrap_or_else(|| "lugia=debug,tower_http=debug".to_string());
 
-        Ok(Self { database_url, jwt_secret, port, cors_origin, uploads_dir, log_filter })
+        let llm = match get("LLM_PROVIDER") {
+            None => None,
+            Some(name) => Some(Self::llm_settings(&get, &name)?),
+        };
+
+        Ok(Self { database_url, jwt_secret, port, cors_origin, uploads_dir, log_filter, llm })
+    }
+
+    fn llm_settings(
+        get: &impl Fn(&str) -> Option<String>,
+        provider_name: &str,
+    ) -> Result<LlmSettings, ConfigError> {
+        let provider = LlmProvider::parse(provider_name)
+            .ok_or(ConfigError::Invalid("LLM_PROVIDER", "expected `anthropic` or `openai`"))?;
+        let api_key = get("LLM_API_KEY").ok_or(ConfigError::Missing("LLM_API_KEY"))?;
+        let model = get("LLM_MODEL").ok_or(ConfigError::Missing("LLM_MODEL"))?;
+
+        let allowed: Vec<String> = get("LLM_ALLOWED_HOSTS")
+            .unwrap_or_else(|| DEFAULT_LLM_ALLOWED_HOSTS.to_string())
+            .split(',')
+            .map(|h| h.trim().to_ascii_lowercase())
+            .filter(|h| !h.is_empty())
+            .collect();
+
+        let base_url = get("LLM_BASE_URL").unwrap_or_else(|| provider.default_base_url().to_string());
+        let mut base_url = Url::parse(&base_url)
+            .map_err(|_| ConfigError::Invalid("LLM_BASE_URL", "not an absolute URL"))?;
+        if !matches!(base_url.scheme(), "http" | "https") {
+            return Err(ConfigError::Invalid("LLM_BASE_URL", "scheme must be http or https"));
+        }
+        let host = base_url
+            .host_str()
+            .map(str::to_ascii_lowercase)
+            .ok_or(ConfigError::Invalid("LLM_BASE_URL", "no host"))?;
+        if !allowed.iter().any(|h| *h == host) {
+            return Err(ConfigError::Invalid("LLM_BASE_URL", "host is not in LLM_ALLOWED_HOSTS"));
+        }
+        // Paths are joined onto the base, so it must end with a slash.
+        if !base_url.path().ends_with('/') {
+            let path = format!("{}/", base_url.path());
+            base_url.set_path(&path);
+        }
+
+        let timeout = match get("LLM_TIMEOUT_SECS") {
+            None => 30,
+            Some(t) => t
+                .parse::<u64>()
+                .ok()
+                .filter(|t| (1..=600).contains(t))
+                .ok_or(ConfigError::Invalid("LLM_TIMEOUT_SECS", "expected 1..=600"))?,
+        };
+
+        Ok(LlmSettings { provider, model, api_key, base_url, timeout: Duration::from_secs(timeout) })
     }
 }
 
@@ -170,6 +235,72 @@ mod tests {
         let text = format!("{cfg:?}");
         assert!(!text.contains("unit-test-secret") && !text.contains("postgres://"), "{text}");
         assert!(text.contains("<redacted>"));
+    }
+
+    fn with_llm(extra: &[(&str, &str)]) -> Result<Config, ConfigError> {
+        let mut pairs = BASE.to_vec();
+        pairs.extend([("LLM_PROVIDER", "anthropic"), ("LLM_API_KEY", "llm-key"), ("LLM_MODEL", "claude-x")]);
+        pairs.extend(extra.iter().copied());
+        Config::from_lookup(env(&pairs))
+    }
+
+    #[test]
+    fn no_llm_provider_means_no_llm() {
+        assert!(Config::from_lookup(env(BASE)).unwrap().llm.is_none());
+    }
+
+    #[test]
+    fn llm_defaults_resolve_per_provider() {
+        let llm = with_llm(&[]).unwrap().llm.unwrap();
+        assert_eq!(llm.provider, LlmProvider::Anthropic);
+        assert_eq!(llm.base_url.as_str(), "https://api.anthropic.com/");
+        assert_eq!(llm.timeout, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn llm_provider_requires_key_and_model() {
+        let mut pairs = BASE.to_vec();
+        pairs.push(("LLM_PROVIDER", "openai"));
+        assert_eq!(Config::from_lookup(env(&pairs)).unwrap_err(), ConfigError::Missing("LLM_API_KEY"));
+        pairs.push(("LLM_API_KEY", "k"));
+        assert_eq!(Config::from_lookup(env(&pairs)).unwrap_err(), ConfigError::Missing("LLM_MODEL"));
+    }
+
+    #[test]
+    fn unknown_llm_provider_is_invalid() {
+        let err = with_llm(&[("LLM_PROVIDER", "mystery")]).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid("LLM_PROVIDER", _)));
+    }
+
+    #[test]
+    fn llm_base_url_outside_allowlist_is_refused() {
+        let err = with_llm(&[("LLM_BASE_URL", "https://evil.example/v1")]).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid("LLM_BASE_URL", _)));
+        assert!(!err.to_string().contains("evil.example"));
+
+        let ok = with_llm(&[("LLM_BASE_URL", "http://localhost:11434"), ("LLM_ALLOWED_HOSTS", "localhost")])
+            .unwrap()
+            .llm
+            .unwrap();
+        assert_eq!(ok.base_url.as_str(), "http://localhost:11434/");
+    }
+
+    #[test]
+    fn llm_base_url_scheme_must_be_http_or_https() {
+        let err = with_llm(&[("LLM_BASE_URL", "ftp://api.anthropic.com"), ]).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid("LLM_BASE_URL", _)));
+    }
+
+    #[test]
+    fn llm_timeout_bounds() {
+        assert!(matches!(with_llm(&[("LLM_TIMEOUT_SECS", "0")]).unwrap_err(), ConfigError::Invalid("LLM_TIMEOUT_SECS", _)));
+        assert_eq!(with_llm(&[("LLM_TIMEOUT_SECS", "5")]).unwrap().llm.unwrap().timeout, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn debug_output_redacts_llm_key() {
+        let text = format!("{:?}", with_llm(&[]).unwrap());
+        assert!(!text.contains("llm-key"), "{text}");
     }
 
     #[test]

@@ -75,7 +75,7 @@ export function GenerateRuModal({
       setStep("review");
     } catch (err) {
       if (err instanceof LlmNotConfiguredError) {
-        toast.error("AI provider not configured. Go to Settings to set it up.");
+        toast.error("AI provider is not configured on this server.");
       } else {
         toast.error(err instanceof Error ? err.message : "Generation failed");
       }

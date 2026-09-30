@@ -1,14 +1,5 @@
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export type LlmProvider = "openai" | "anthropic" | "ollama" | "custom";
-
-export interface LlmConfig {
-  provider: LlmProvider;
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-}
-
 export interface LlmMessage {
   role: "system" | "user" | "assistant";
   content: string;
@@ -19,76 +10,60 @@ export interface LlmCallOptions {
   maxTokens?: number;
 }
 
-const STORAGE_KEY = "llm_config";
+/** What the server reports about its own model configuration. No credential. */
+export interface LlmStatus {
+  configured: boolean;
+  provider: "anthropic" | "openai" | null;
+  model: string | null;
+}
 
-// ─── Defaults by provider ────────────────────────────────────────────────────
-
-export const PROVIDER_DEFAULTS: Record<
-  LlmProvider,
-  Pick<LlmConfig, "baseUrl" | "model">
-> = {
-  openai: { baseUrl: "https://api.openai.com", model: "gpt-4o-mini" },
-  anthropic: {
-    baseUrl: "https://api.anthropic.com",
-    model: "claude-sonnet-4-5-20250929",
-  },
-  ollama: { baseUrl: "http://localhost:11434", model: "llama3.2" },
-  custom: { baseUrl: "", model: "" },
-};
-
-// ─── Config CRUD ─────────────────────────────────────────────────────────────
-
-export function getLlmConfig(): LlmConfig | null {
+/**
+ * Provider, model, key and endpoint are configured on the server (`LLM_*`
+ * variables). The browser never holds them. Earlier builds kept them in
+ * localStorage under this key; remove any leftover copy.
+ */
+const LEGACY_STORAGE_KEY = "llm_config";
+export function clearLegacyLlmConfig(): void {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as LlmConfig) : null;
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
   } catch {
-    return null;
+    // storage unavailable; nothing to clear
   }
 }
 
-export function saveLlmConfig(config: LlmConfig): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-}
-
-export function clearLlmConfig(): void {
-  localStorage.removeItem(STORAGE_KEY);
-}
-
-// ─── LLM call through proxy ──────────────────────────────────────────────────
+// ─── LLM calls through the server ────────────────────────────────────────────
 
 export class LlmNotConfiguredError extends Error {
   constructor() {
-    super("LLM provider not configured. Set it in Settings → AI Provider.");
+    super("AI provider is not configured on this server.");
   }
 }
 
-export async function callLlm(opts: LlmCallOptions): Promise<string> {
-  const config = getLlmConfig();
-  if (!config || !config.apiKey) throw new LlmNotConfiguredError();
-
-  const res = await fetch("/api/llm/proxy", {
-    method: "POST",
+async function llmRequest<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+  const opts: RequestInit = {
+    method,
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      provider: config.provider,
-      baseUrl: config.baseUrl,
-      apiKey: config.apiKey,
-      model: config.model,
-      messages: opts.messages,
-      maxTokens: opts.maxTokens,
-    }),
-  });
-
+  };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  if (res.status === 503) throw new LlmNotConfiguredError();
   if (!res.ok) {
     const payload = await res.json().catch(() => null);
-    throw new Error(
-      payload?.error ?? `LLM proxy error ${res.status}`
-    );
+    throw new Error(payload?.error ?? `AI request failed (${res.status})`);
   }
+  return res.json() as Promise<T>;
+}
 
-  const data = (await res.json()) as { content: string };
+export function fetchLlmStatus(): Promise<LlmStatus> {
+  return llmRequest<LlmStatus>("GET", "/api/llm/status");
+}
+
+export async function callLlm(opts: LlmCallOptions): Promise<string> {
+  const data = await llmRequest<{ content: string }>("POST", "/api/llm/proxy", {
+    messages: opts.messages,
+    maxTokens: opts.maxTokens,
+  });
   return data.content;
 }
 

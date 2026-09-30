@@ -1,5 +1,6 @@
 mod config;
 mod error;
+mod llm;
 mod routes;
 mod state;
 
@@ -46,8 +47,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
         .allow_credentials(true);
 
+    // Model access: fixed here, never from a request.
+    let llm = match config.llm {
+        Some(settings) => {
+            tracing::info!(provider = settings.provider.name(), model = %settings.model, "LLM provider configured");
+            Some(std::sync::Arc::new(llm::LlmClient::new(settings)?))
+        }
+        None => {
+            tracing::info!("No LLM provider configured; /api/llm/proxy answers 503");
+            None
+        }
+    };
+
     let port = config.port;
-    let state = AppState { pool, jwt_secret: config.jwt_secret, uploads_dir: config.uploads_dir };
+    let state = AppState { pool, jwt_secret: config.jwt_secret, uploads_dir: config.uploads_dir, llm };
 
     let app = Router::new()
         .merge(routes::router())
