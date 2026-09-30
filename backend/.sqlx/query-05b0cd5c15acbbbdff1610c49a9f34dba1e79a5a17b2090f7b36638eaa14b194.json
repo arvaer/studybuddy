@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT r.id, r.activity_id, r.revision, r.prompt, r.options, r.answer_key, r.rubric,\n                   r.source_resource_id, r.source_location, r.created_at\n            FROM activity_revisions r\n            JOIN activities a ON a.id = r.activity_id\n            WHERE r.id = $1 AND a.user_id = $2\n            ",
+  "query": "\n            SELECT r.id, r.activity_id, r.revision, r.prompt, r.options, r.answer_key, r.rubric,\n                   r.source_resource_id, r.source_artifact_id, r.source_location, r.created_at\n            FROM activity_revisions r\n            JOIN activities a ON a.id = r.activity_id\n            WHERE r.id = $1 AND a.user_id = $2\n            ",
   "describe": {
     "columns": [
       {
@@ -45,11 +45,16 @@
       },
       {
         "ordinal": 8,
+        "name": "source_artifact_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
         "name": "source_location",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -70,8 +75,9 @@
       true,
       true,
       true,
+      true,
       false
     ]
   },
-  "hash": "f07cc1a8eb65b744e288fe3bf9e827f3413ee546656626c199fdf149b27d4e6b"
+  "hash": "05b0cd5c15acbbbdff1610c49a9f34dba1e79a5a17b2090f7b36638eaa14b194"
 }

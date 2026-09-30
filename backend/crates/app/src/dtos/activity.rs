@@ -52,6 +52,8 @@ pub struct RevisionResponse {
     /// Whether a deterministic assessment applies; the key itself is withheld.
     pub has_answer_key:     bool,
     pub source_resource_id: Option<String>,
+    /// The exact upload cited; open it at `GET /api/artifacts/{id}/bytes`.
+    pub source_artifact_id: Option<String>,
     pub source_location:    Option<Value>,
     pub created_at:         String,
 }
@@ -66,6 +68,7 @@ impl From<ActivityRevision> for RevisionResponse {
             options:            r.options,
             has_answer_key:     r.answer_key.is_some(),
             source_resource_id: r.source_resource_id.map(|u| u.to_string()),
+            source_artifact_id: r.source_artifact_id.map(|u| u.to_string()),
             source_location:    r.source_location,
             created_at:         r.created_at.to_rfc3339(),
         }

@@ -1,50 +1,44 @@
 use std::path::PathBuf;
 use uuid::Uuid;
 
-use domain::repository_traits::ResourceRepository;
+use domain::repository_traits::{ArtifactRepository, ResourceRepository};
 
 use crate::dtos::resource::ResourceResponse;
 use crate::errors::AppError;
+use crate::services::artifact::ArtifactStore;
 
-pub struct UploadService<R: ResourceRepository> {
-    repo:        R,
-    uploads_dir: PathBuf,
+pub struct UploadService<R: ResourceRepository, A: ArtifactRepository> {
+    repo:      R,
+    artifacts: ArtifactStore<A>,
 }
 
-impl<R: ResourceRepository> UploadService<R> {
-    pub fn new(repo: R, uploads_dir: PathBuf) -> Self {
-        Self { repo, uploads_dir }
+impl<R: ResourceRepository, A: ArtifactRepository> UploadService<R, A> {
+    pub fn new(repo: R, artifacts: A, uploads_dir: PathBuf) -> Self {
+        Self { repo, artifacts: ArtifactStore::new(artifacts, uploads_dir) }
     }
 
-    /// Persist an uploaded file to disk and create a Resource record.
+    /// Store the bytes as an immutable artifact, then create the Resource
+    /// that points at it (#11). The bytes are addressed by content, never by
+    /// filename, so a later upload with the same name is a new artifact and
+    /// cannot replace this one.
     ///
-    /// `content_text` should be pre-extracted by the caller (e.g. PDF text
-    /// extraction happens in the route handler which has access to `infra`).
+    /// `content_text`/`content_pages` are pre-extracted by the caller.
+    #[allow(clippy::too_many_arguments)]
     pub async fn upload(
         &self,
         user_id: Uuid,
         topic_id: Uuid,
         title: String,
         filename: String,
+        content_type: &str,
         bytes: &[u8],
         content_text: String,
         content_pages: Vec<String>,
         resource_type: &str,
         concept_ids: Vec<Uuid>,
     ) -> Result<ResourceResponse, AppError> {
-        // Persist file to disk
-        let user_dir = self.uploads_dir.join(user_id.to_string());
-        tokio::fs::create_dir_all(&user_dir)
-            .await
-            .map_err(|e| AppError::Unexpected(format!("create upload dir: {e}")))?;
-
-        let safe_name = sanitize_filename(&filename);
-        let file_path = user_dir.join(&safe_name);
-        tokio::fs::write(&file_path, bytes)
-            .await
-            .map_err(|e| AppError::Unexpected(format!("write upload file: {e}")))?;
-
-        let file_path_str = file_path.to_string_lossy().to_string();
+        let artifact = self.artifacts.put(user_id, &filename, content_type, bytes).await?;
+        let file_path = self.artifacts.blob_path(&artifact.sha256).to_string_lossy().to_string();
 
         let resource = self
             .repo
@@ -53,7 +47,8 @@ impl<R: ResourceRepository> UploadService<R> {
                 topic_id,
                 &title,
                 resource_type,
-                &file_path_str,
+                artifact.id,
+                &file_path,
                 &content_text,
                 &content_pages,
                 &concept_ids,
@@ -63,22 +58,8 @@ impl<R: ResourceRepository> UploadService<R> {
         Ok(ResourceResponse::from(resource))
     }
 
-    pub async fn get_content(
-        &self,
-        id: Uuid,
-        user_id: Uuid,
-    ) -> Result<String, AppError> {
-        let text = self
-            .repo
-            .get_content_text(id, user_id)
-            .await?
-            .unwrap_or_default();
+    pub async fn get_content(&self, id: Uuid, user_id: Uuid) -> Result<String, AppError> {
+        let text = self.repo.get_content_text(id, user_id).await?.unwrap_or_default();
         Ok(text)
     }
-}
-
-fn sanitize_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
-        .collect()
 }

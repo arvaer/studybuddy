@@ -370,6 +370,7 @@ pub trait ResourceRepository: Send + Sync {
         topic_id: Uuid,
         title: &str,
         resource_type: &str,
+        artifact_id: Uuid,
         file_path: &str,
         content_text: &str,
         content_pages: &[String],
@@ -485,6 +486,23 @@ pub trait AttemptRepository: Send + Sync {
         attempt_id: Uuid,
         user_id: Uuid,
     ) -> impl std::future::Future<Output = Result<crate::learning::AttemptReceipt, DomainError>> + Send;
+}
+
+// ─── ArtifactRepository ──────────────────────────────────────────────────────
+
+/// Metadata for uploaded bytes (#11). Rows are immutable; `find` predicates
+/// on the owner.
+pub trait ArtifactRepository: Send + Sync {
+    fn store(
+        &self,
+        cmd: crate::artifacts::NewArtifact,
+    ) -> impl std::future::Future<Output = Result<crate::artifacts::Artifact, DomainError>> + Send;
+
+    fn find(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+    ) -> impl std::future::Future<Output = Result<crate::artifacts::Artifact, DomainError>> + Send;
 }
 
 // ─── ActivityRepository ──────────────────────────────────────────────────────

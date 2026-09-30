@@ -43,9 +43,11 @@ async fn insert_revision(
     let row = sqlx::query!(
         r#"
         INSERT INTO activity_revisions
-            (activity_id, revision, prompt, options, answer_key, rubric, source_resource_id, source_location)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING id, created_at
+            (activity_id, revision, prompt, options, answer_key, rubric,
+             source_resource_id, source_artifact_id, source_location)
+        VALUES ($1, $2, $3, $4, $5, $6, $7,
+                (SELECT artifact_id FROM resources WHERE id = $7), $8)
+        RETURNING id, source_artifact_id, created_at
         "#,
         activity_id,
         number,
@@ -69,6 +71,7 @@ async fn insert_revision(
         answer_key:         c.answer_key.clone(),
         rubric:             c.rubric.clone(),
         source_resource_id: c.source_resource_id,
+        source_artifact_id: row.source_artifact_id,
         source_location:    c.source_location.clone(),
         created_at:         row.created_at,
     })
@@ -88,6 +91,7 @@ struct CurrentRow {
     r_answer_key:       Option<serde_json::Value>,
     r_rubric:           Option<String>,
     r_source_resource_id: Option<Uuid>,
+    r_source_artifact_id: Option<Uuid>,
     r_source_location:  Option<serde_json::Value>,
     r_created_at:       chrono::DateTime<chrono::Utc>,
 }
@@ -114,6 +118,7 @@ impl TryFrom<CurrentRow> for ActivityWithRevision {
                 answer_key:         r.r_answer_key,
                 rubric:             r.r_rubric,
                 source_resource_id: r.r_source_resource_id,
+                source_artifact_id: r.r_source_artifact_id,
                 source_location:    r.r_source_location,
                 created_at:         r.r_created_at,
             },
@@ -130,7 +135,8 @@ impl PgActivityRepository {
             SELECT a.id, a.user_id, a.concept_id, a.kind::TEXT AS "kind!", a.created_at,
                    r.id AS r_id, r.revision AS r_revision, r.prompt AS r_prompt, r.options AS r_options,
                    r.answer_key AS r_answer_key, r.rubric AS r_rubric,
-                   r.source_resource_id AS r_source_resource_id, r.source_location AS r_source_location,
+                   r.source_resource_id AS r_source_resource_id, r.source_artifact_id AS r_source_artifact_id,
+                   r.source_location AS r_source_location,
                    r.created_at AS r_created_at
             FROM activities a
             JOIN LATERAL (
@@ -236,7 +242,7 @@ impl ActivityRepository for PgActivityRepository {
         let row = sqlx::query!(
             r#"
             SELECT r.id, r.activity_id, r.revision, r.prompt, r.options, r.answer_key, r.rubric,
-                   r.source_resource_id, r.source_location, r.created_at
+                   r.source_resource_id, r.source_artifact_id, r.source_location, r.created_at
             FROM activity_revisions r
             JOIN activities a ON a.id = r.activity_id
             WHERE r.id = $1 AND a.user_id = $2
@@ -258,6 +264,7 @@ impl ActivityRepository for PgActivityRepository {
             answer_key:         row.answer_key,
             rubric:             row.rubric,
             source_resource_id: row.source_resource_id,
+            source_artifact_id: row.source_artifact_id,
             source_location:    row.source_location,
             created_at:         row.created_at,
         })

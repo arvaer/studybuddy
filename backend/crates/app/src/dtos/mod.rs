@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod artifact;
 pub mod attempt;
 pub mod auth;
 pub mod claim;

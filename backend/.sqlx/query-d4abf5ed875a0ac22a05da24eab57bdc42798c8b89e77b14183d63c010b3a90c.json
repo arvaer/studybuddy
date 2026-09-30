@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT a.id, a.user_id, a.concept_id, a.kind::TEXT AS \"kind!\", a.created_at,\n                   r.id AS r_id, r.revision AS r_revision, r.prompt AS r_prompt, r.options AS r_options,\n                   r.answer_key AS r_answer_key, r.rubric AS r_rubric,\n                   r.source_resource_id AS r_source_resource_id, r.source_location AS r_source_location,\n                   r.created_at AS r_created_at\n            FROM activities a\n            JOIN LATERAL (\n                SELECT * FROM activity_revisions WHERE activity_id = a.id ORDER BY revision DESC LIMIT 1\n            ) r ON true\n            WHERE a.user_id = $1 AND ($2::uuid IS NULL OR a.id = $2)\n            ORDER BY a.created_at DESC, a.id\n            ",
+  "query": "\n            SELECT a.id, a.user_id, a.concept_id, a.kind::TEXT AS \"kind!\", a.created_at,\n                   r.id AS r_id, r.revision AS r_revision, r.prompt AS r_prompt, r.options AS r_options,\n                   r.answer_key AS r_answer_key, r.rubric AS r_rubric,\n                   r.source_resource_id AS r_source_resource_id, r.source_artifact_id AS r_source_artifact_id,\n                   r.source_location AS r_source_location,\n                   r.created_at AS r_created_at\n            FROM activities a\n            JOIN LATERAL (\n                SELECT * FROM activity_revisions WHERE activity_id = a.id ORDER BY revision DESC LIMIT 1\n            ) r ON true\n            WHERE a.user_id = $1 AND ($2::uuid IS NULL OR a.id = $2)\n            ORDER BY a.created_at DESC, a.id\n            ",
   "describe": {
     "columns": [
       {
@@ -65,11 +65,16 @@
       },
       {
         "ordinal": 12,
+        "name": "r_source_artifact_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 13,
         "name": "r_source_location",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "r_created_at",
         "type_info": "Timestamptz"
       }
@@ -94,8 +99,9 @@
       true,
       true,
       true,
+      true,
       false
     ]
   },
-  "hash": "d44546a662a5eaeef637599c8069217f8503ff7ca5b38f06302801feac4f68e6"
+  "hash": "d4abf5ed875a0ac22a05da24eab57bdc42798c8b89e77b14183d63c010b3a90c"
 }

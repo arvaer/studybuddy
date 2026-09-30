@@ -151,6 +151,9 @@ pub struct Resource {
     pub title:         String,
     pub resource_type: ResourceType,
     pub url:           Option<String>,
+    /// The immutable upload this resource was created from (#11); `None`
+    /// for URL resources and uploads from before the artifact store.
+    pub artifact_id:   Option<Uuid>,
     pub file_path:     Option<String>,
     pub content_text:  Option<String>,
     pub content_pages: Option<Vec<String>>,
