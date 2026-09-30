@@ -89,7 +89,10 @@ async fn upload(
                 bytes = field
                     .bytes()
                     .await
-                    .map_err(|e| HttpError(AppError::Unexpected(format!("read file: {e}"))))?
+                    // A body that ends early is the client's failure, and
+                    // nothing has been stored yet: the store is not touched
+                    // until the whole field is in memory (#12).
+                    .map_err(|e| HttpError(AppError::Validation(format!("incomplete upload: {e}"))))?
                     .to_vec();
             }
             "topicId" => topic_id_str = field.text().await.unwrap_or_default(),

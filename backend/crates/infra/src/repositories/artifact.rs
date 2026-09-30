@@ -66,4 +66,11 @@ impl ArtifactRepository for PgArtifactRepository {
         .map_err(db)?
         .ok_or_else(|| DomainError::NotFound(format!("artifact {id}")))
     }
+
+    async fn addresses(&self) -> Result<Vec<String>, DomainError> {
+        sqlx::query_scalar!("SELECT DISTINCT sha256 FROM artifacts ORDER BY sha256")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db)
+    }
 }

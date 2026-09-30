@@ -37,6 +37,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Database
     let pool = infra::db::create_pool(&config.database_url).await?;
+
+    // `lugia audit-artifacts`: compare the artifact catalog with the blob
+    // directory and exit (#12). Reports only, never deletes, never migrates.
+    if std::env::args().nth(1).as_deref() == Some("audit-artifacts") {
+        let store = app::services::artifact::ArtifactStore::new(
+            infra::repositories::artifact::PgArtifactRepository::new(pool),
+            config.uploads_dir,
+        );
+        let report = store.audit().await?;
+        for a in &report.missing {
+            println!("missing {a}");
+        }
+        for a in &report.orphans {
+            println!("orphan  {a}");
+        }
+        for p in &report.parts {
+            println!("part    {}", p.display());
+        }
+        println!(
+            "{} missing, {} orphan, {} part",
+            report.missing.len(),
+            report.orphans.len(),
+            report.parts.len()
+        );
+        std::process::exit(if report.missing.is_empty() { 0 } else { 1 });
+    }
+
     infra::db::run_migrations(&pool).await?;
     tracing::info!("Migrations applied");
 

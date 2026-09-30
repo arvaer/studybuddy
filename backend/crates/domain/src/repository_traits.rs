@@ -503,6 +503,10 @@ pub trait ArtifactRepository: Send + Sync {
         id: Uuid,
         user_id: Uuid,
     ) -> impl std::future::Future<Output = Result<crate::artifacts::Artifact, DomainError>> + Send;
+
+    /// Every distinct content address the catalog knows, across all owners.
+    /// Used by the audit (#12) to compare the catalog with the blob directory.
+    fn addresses(&self) -> impl std::future::Future<Output = Result<Vec<String>, DomainError>> + Send;
 }
 
 // ─── ActivityRepository ──────────────────────────────────────────────────────
