@@ -21,8 +21,8 @@ Recorded 2026-09-29 while establishing the [development setup](development.md) f
 
 | Finding | Detail |
 | --- | --- |
-| Backend has **zero tests**: `cargo test` runs 0 tests across all crates. | #2 |
-| Frontend test suite is one placeholder asserting `true`. | #2 |
+| Backend had **zero tests**: `cargo test` ran 0 tests across all crates. Resolved by #2: `#[sqlx::test]` repository tests in `crates/infra/tests/`. | #2 |
+| Frontend test suite was one placeholder asserting `true`. Resolved by #2: replaced with `src/lib/api.test.ts`. | #2 |
 | `npm run lint` reports 6 errors and 9 warnings in: `src/components/markdown-renderer.tsx`, `src/components/quiz-config-modal.tsx`, `src/components/ui/command.tsx`, `src/components/ui/textarea.tsx`, `src/pages/Auth.tsx`, `tailwind.config.ts`. | Not fixed; lint is not yet a gate. |
 | `cargo build` emits one warning (unused `mut`) in the `lugia` binary. | Not fixed. |
 | Vite build warns that the main chunk is 1.3 MB minified. | Not fixed. |
@@ -34,4 +34,4 @@ Recorded 2026-09-29 while establishing the [development setup](development.md) f
 - Migrations apply cleanly from an empty Postgres 16 database (4 migrations).
 - Backend compiles online against the isolated database and offline with the regenerated cache.
 - Backend starts and serves: unauthenticated `GET /api/topics` returns 401.
-- Frontend installs, builds, and its single test passes.
+- Frontend installs, builds, and its tests pass (`scripts/test.sh frontend`).

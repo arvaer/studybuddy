@@ -40,9 +40,15 @@ Configuration is read from the environment (and from `backend/.env` via dotenvy 
 cd backend
 export JWT_SECRET=dev-only-not-a-secret
 cargo build            # compiles SQLx queries against $DATABASE_URL
-cargo test
+cargo test --workspace
 cargo run              # listens on 0.0.0.0:3000
 ```
+
+### Backend tests
+
+Repository tests live in `backend/crates/<crate>/tests/` and use `#[sqlx::test(migrations = "../../migrations")]` (see `crates/infra/tests/user_repository.rs`). Each test gets its own freshly migrated database on the server at `DATABASE_URL`, which sqlx creates before the test and drops after it. Tests therefore never share state, and the disposable container is the only server they should ever see. Add a new test file per repository or service; no further wiring is needed.
+
+Unit tests without a database go in the usual `#[cfg(test)] mod tests` blocks and run in the same `cargo test`.
 
 To build without a database, set `SQLX_OFFLINE=true`. This uses the committed `backend/.sqlx` query cache. **Whenever a `sqlx::query!` changes, regenerate the cache and commit it:**
 
@@ -57,17 +63,26 @@ cd frontend
 npm install
 npm run build
 npm run lint
-npm test
+npm test               # vitest, src/**/*.test.{ts,tsx}
 npm run dev            # http://localhost:8080, proxies /api to localhost:3000
 ```
 
-## 4. Full check
+## 4. Tests
+
+`scripts/test.sh` runs both suites. It starts the disposable database if `DATABASE_URL` is unset, then runs `cargo test --workspace` and `npm test`. Pass `backend` or `frontend` to run one suite.
+
+```sh
+scripts/test.sh
+```
+
+## 5. Full check
 
 Run before opening a PR. All of these must pass, or the failure must be listed in [baseline findings](baseline-findings.md).
 
 ```sh
 scripts/dev-db.sh reset && scripts/dev-db.sh migrate
 export DATABASE_URL="$(scripts/dev-db.sh url)"
-(cd backend && cargo build && cargo test && SQLX_OFFLINE=true cargo build)
-(cd frontend && npm run build && npm test)
+scripts/test.sh
+(cd backend && SQLX_OFFLINE=true cargo build)
+(cd frontend && npm run build)
 ```
