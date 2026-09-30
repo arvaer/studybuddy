@@ -1,0 +1,73 @@
+# Development setup
+
+Verified on 2026-09-29 from a fresh checkout (see [baseline findings](baseline-findings.md) for what did not work). This is the procedure the hardening plan's baseline ticket asks for; keep it current when a step changes.
+
+## Prerequisites
+
+| Tool | Verified with | Notes |
+| --- | --- | --- |
+| Rust toolchain | 1.92.0 | No `rust-toolchain` file is pinned yet. |
+| sqlx-cli | 0.8.6 | `cargo install sqlx-cli --no-default-features --features postgres` |
+| Node.js + npm | 26.1.0 / 11.13.0 | `package-lock.json` is authoritative; `bun.lockb` is also present. |
+| Docker | 29.x | Only for the disposable database below. |
+
+## 1. Isolated database
+
+The backend **runs migrations automatically at startup** (`infra::db::run_migrations`). Never point `DATABASE_URL` at a database you care about: use the disposable container.
+
+```sh
+scripts/dev-db.sh up        # postgres:16 on 127.0.0.1:55432, user/db "studybuddy"
+scripts/dev-db.sh migrate   # applies backend/migrations from empty
+export DATABASE_URL="$(scripts/dev-db.sh url)"
+```
+
+`scripts/dev-db.sh reset` gives you a fresh empty database; `down` removes the container. Port, name and credentials can be overridden with `STUDYBUDDY_PG_*` variables.
+
+## 2. Backend
+
+Configuration is read from the environment (and from `backend/.env` via dotenvy if present):
+
+| Variable | Required | Default |
+| --- | --- | --- |
+| `DATABASE_URL` | yes | none; startup panics without it |
+| `JWT_SECRET` | **should be** | falls back to a known string (tracked as a hardening finding) |
+| `PORT` | no | `3000` |
+| `CORS_ORIGIN` | no | `http://localhost:8080` |
+| `UPLOADS_DIR` | no | `data/uploads` (relative to the working directory) |
+| `RUST_LOG` | no | `lugia=debug,tower_http=debug` |
+
+```sh
+cd backend
+export JWT_SECRET=dev-only-not-a-secret
+cargo build            # compiles SQLx queries against $DATABASE_URL
+cargo test
+cargo run              # listens on 0.0.0.0:3000
+```
+
+To build without a database, set `SQLX_OFFLINE=true`. This uses the committed `backend/.sqlx` query cache. **Whenever a `sqlx::query!` changes, regenerate the cache and commit it:**
+
+```sh
+cd backend && cargo sqlx prepare --workspace
+```
+
+## 3. Frontend
+
+```sh
+cd frontend
+npm install
+npm run build
+npm run lint
+npm test
+npm run dev            # http://localhost:8080, proxies /api to localhost:3000
+```
+
+## 4. Full check
+
+Run before opening a PR. All of these must pass, or the failure must be listed in [baseline findings](baseline-findings.md).
+
+```sh
+scripts/dev-db.sh reset && scripts/dev-db.sh migrate
+export DATABASE_URL="$(scripts/dev-db.sh url)"
+(cd backend && cargo build && cargo test && SQLX_OFFLINE=true cargo build)
+(cd frontend && npm run build && npm test)
+```

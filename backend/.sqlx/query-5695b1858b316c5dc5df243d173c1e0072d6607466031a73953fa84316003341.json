@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, user_id, topic_id, title, resource_type::TEXT AS resource_type,\n                   url, added_at\n            FROM resources WHERE id = $1 AND user_id = $2\n            ",
+  "query": "\n            SELECT id, concept_id, predicate, supporting_text, asset_id, source_location, introduced_at\n            FROM claims_in_context WHERE asset_id = $1\n            ORDER BY introduced_at ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -10,38 +10,37 @@
       },
       {
         "ordinal": 1,
-        "name": "user_id",
+        "name": "concept_id",
         "type_info": "Uuid"
       },
       {
         "ordinal": 2,
-        "name": "topic_id",
-        "type_info": "Uuid"
+        "name": "predicate",
+        "type_info": "Text"
       },
       {
         "ordinal": 3,
-        "name": "title",
+        "name": "supporting_text",
         "type_info": "Text"
       },
       {
         "ordinal": 4,
-        "name": "resource_type",
-        "type_info": "Text"
+        "name": "asset_id",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 5,
-        "name": "url",
-        "type_info": "Text"
+        "name": "source_location",
+        "type_info": "Jsonb"
       },
       {
         "ordinal": 6,
-        "name": "added_at",
+        "name": "introduced_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
         "Uuid"
       ]
     },
@@ -50,10 +49,10 @@
       false,
       false,
       false,
-      null,
+      true,
       true,
       false
     ]
   },
-  "hash": "184a1ae0e1c8aa0ab2412a9ce2fd1220ec48298bd431656633d0657934219201"
+  "hash": "5695b1858b316c5dc5df243d173c1e0072d6607466031a73953fa84316003341"
 }
