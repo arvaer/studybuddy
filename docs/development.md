@@ -35,6 +35,14 @@ Configuration is read once at startup by `backend/src/config.rs`, which is the s
 | `CORS_ORIGIN` | no | `http://localhost:8080` |
 | `UPLOADS_DIR` | no | `data/uploads` (relative to the working directory) |
 | `RUST_LOG` | no | `lugia=debug,tower_http=debug` |
+| `LLM_PROVIDER` | no | unset means no model access; `POST /api/llm/proxy` answers 503. Values: `anthropic`, `openai` (also Ollama and other OpenAI-compatible servers) |
+| `LLM_API_KEY` | with a provider | none; never logged. Ollama ignores it but a placeholder is still required |
+| `LLM_MODEL` | with a provider | none |
+| `LLM_BASE_URL` | no | `https://api.anthropic.com` or `https://api.openai.com`; its host must be in `LLM_ALLOWED_HOSTS` |
+| `LLM_ALLOWED_HOSTS` | no | `api.anthropic.com,api.openai.com`; the only hosts the backend will call. For Ollama: `localhost` with `LLM_BASE_URL=http://localhost:11434` |
+| `LLM_TIMEOUT_SECS` | no | `30` (1..=600) |
+
+The browser never holds model credentials: the proxy accepts only `messages` and `maxTokens`, and any `provider`, `model`, `apiKey` or `baseUrl` field is rejected with 422. Provider failures map to 502 (unreachable, error status, unexpected body) or 504 (timeout); the provider's response body is never forwarded. `GET /api/llm/status` reports whether a provider is configured and which model, without the key.
 
 Generate a local secret with `openssl rand -base64 48`. A `backend/.env` existed in git history before issue #5; treat any value from it as public and rotate it wherever it was deployed.
 

@@ -9,9 +9,6 @@ import {
   Loader2,
   Save,
   Bot,
-  Eye,
-  EyeOff,
-  Trash2,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -19,24 +16,14 @@ import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchSettings, updateSettings, type Settings } from "@/lib/api";
 import {
-  getLlmConfig,
-  saveLlmConfig,
-  clearLlmConfig,
   callLlm,
-  PROVIDER_DEFAULTS,
-  type LlmProvider,
-  type LlmConfig,
+  clearLegacyLlmConfig,
+  fetchLlmStatus,
+  LlmNotConfiguredError,
+  type LlmStatus,
 } from "@/lib/llm";
 import { toast } from "sonner";
 
@@ -59,12 +46,8 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // AI Provider state (localStorage-backed, independent of server settings)
-  const [llmProvider, setLlmProvider] = useState<LlmProvider>("openai");
-  const [llmApiKey, setLlmApiKey] = useState("");
-  const [llmModel, setLlmModel] = useState("");
-  const [llmBaseUrl, setLlmBaseUrl] = useState("");
-  const [showApiKey, setShowApiKey] = useState(false);
+  // AI provider is configured on the server; the browser only reads status.
+  const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
   const [testingConnection, setTestingConnection] = useState(false);
 
   useEffect(() => {
@@ -74,19 +57,11 @@ export default function SettingsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Load LLM config from localStorage on mount
   useEffect(() => {
-    const cfg = getLlmConfig();
-    if (cfg) {
-      setLlmProvider(cfg.provider);
-      setLlmApiKey(cfg.apiKey);
-      setLlmModel(cfg.model);
-      setLlmBaseUrl(cfg.baseUrl);
-    } else {
-      const defaults = PROVIDER_DEFAULTS["openai"];
-      setLlmModel(defaults.model);
-      setLlmBaseUrl(defaults.baseUrl);
-    }
+    clearLegacyLlmConfig();
+    fetchLlmStatus()
+      .then(setLlmStatus)
+      .catch((err) => console.error("Failed to load AI provider status:", err));
   }, []);
 
   const isDirty = JSON.stringify(draft) !== JSON.stringify(savedSettings);
@@ -108,47 +83,17 @@ export default function SettingsPage() {
     setDraft((prev) => ({ ...prev, ...patch }));
   };
 
-  const handleProviderChange = (provider: LlmProvider) => {
-    setLlmProvider(provider);
-    const defaults = PROVIDER_DEFAULTS[provider];
-    setLlmModel(defaults.model);
-    setLlmBaseUrl(defaults.baseUrl);
-    saveLlmConfig({ provider, apiKey: llmApiKey, model: defaults.model, baseUrl: defaults.baseUrl });
-  };
-
-  const handleLlmFieldChange = (field: keyof LlmConfig, value: string) => {
-    if (field === "apiKey") setLlmApiKey(value);
-    else if (field === "model") setLlmModel(value);
-    else if (field === "baseUrl") setLlmBaseUrl(value);
-    const cfg: LlmConfig = {
-      provider: llmProvider,
-      apiKey: field === "apiKey" ? value : llmApiKey,
-      model: field === "model" ? value : llmModel,
-      baseUrl: field === "baseUrl" ? value : llmBaseUrl,
-    };
-    saveLlmConfig(cfg);
-  };
-
   const handleTestConnection = async () => {
     setTestingConnection(true);
     try {
       await callLlm({ messages: [{ role: "user", content: "Say OK" }], maxTokens: 10 });
       toast.success("Connection successful");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Connection failed");
+      if (err instanceof LlmNotConfiguredError) toast.error(err.message);
+      else toast.error(err instanceof Error ? err.message : "Connection failed");
     } finally {
       setTestingConnection(false);
     }
-  };
-
-  const handleClearLlm = () => {
-    clearLlmConfig();
-    setLlmProvider("openai");
-    setLlmApiKey("");
-    const defaults = PROVIDER_DEFAULTS["openai"];
-    setLlmModel(defaults.model);
-    setLlmBaseUrl(defaults.baseUrl);
-    toast.success("AI provider config cleared");
   };
 
   if (loading) {
@@ -274,74 +219,29 @@ export default function SettingsPage() {
             </div>
 
             <div className="space-y-4">
-              <div className="space-y-2">
-                <Label className="text-foreground">Provider</Label>
-                <Select value={llmProvider} onValueChange={(v) => handleProviderChange(v as LlmProvider)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="openai">OpenAI</SelectItem>
-                    <SelectItem value="anthropic">Anthropic</SelectItem>
-                    <SelectItem value="ollama">Ollama</SelectItem>
-                    <SelectItem value="custom">Custom</SelectItem>
-                  </SelectContent>
-                </Select>
+              <p className="text-sm text-muted-foreground">
+                The AI provider is configured by the server administrator. API keys never leave the server.
+              </p>
+              <div className="text-sm text-foreground">
+                {llmStatus === null ? (
+                  <span className="text-muted-foreground">Checking…</span>
+                ) : llmStatus.configured ? (
+                  <span>
+                    Configured: <span className="font-medium">{llmStatus.provider}</span> · {llmStatus.model}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">Not configured on this server.</span>
+                )}
               </div>
-
-              <div className="space-y-2">
-                <Label className="text-foreground">API Key</Label>
-                <div className="relative">
-                  <Input
-                    type={showApiKey ? "text" : "password"}
-                    value={llmApiKey}
-                    onChange={(e) => handleLlmFieldChange("apiKey", e.target.value)}
-                    placeholder="sk-..."
-                    className="pr-10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowApiKey(!showApiKey)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  >
-                    {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-foreground">Model</Label>
-                <Input
-                  value={llmModel}
-                  onChange={(e) => handleLlmFieldChange("model", e.target.value)}
-                  placeholder="gpt-4o-mini"
-                />
-              </div>
-
-              {(llmProvider === "ollama" || llmProvider === "custom") && (
-                <div className="space-y-2">
-                  <Label className="text-foreground">Base URL</Label>
-                  <Input
-                    value={llmBaseUrl}
-                    onChange={(e) => handleLlmFieldChange("baseUrl", e.target.value)}
-                    placeholder="http://localhost:11434"
-                  />
-                </div>
-              )}
-
               <div className="flex gap-2 pt-2">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleTestConnection}
-                  disabled={testingConnection || !llmApiKey}
+                  disabled={testingConnection || !llmStatus?.configured}
                 >
                   {testingConnection ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
                   Test Connection
-                </Button>
-                <Button variant="ghost" size="sm" onClick={handleClearLlm}>
-                  <Trash2 className="h-4 w-4 mr-1.5" />
-                  Clear
                 </Button>
               </div>
             </div>

@@ -31,7 +31,7 @@ Status after #3 (questions), #4 (reinforcement units) and #29 (linked ids). "Own
 | `GET /api/progress` | yes | all CTEs filter on `user_id` |
 | `GET/PATCH /api/settings` | yes | keyed by `user_id` |
 | `GET /api/auth/me`, `POST /api/auth/{login,register,refresh,logout}` | n/a | identity itself; reviewed under #5/#6 |
-| `POST /api/llm/*` | n/a | no owned records; client-supplied configuration is #6 |
+| `POST /api/llm/*` | n/a | no owned records; provider, model, key and destination are server configuration (#6) |
 
 ### Repositories with unscoped methods but no route caller
 
