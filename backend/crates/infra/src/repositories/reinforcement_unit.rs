@@ -59,14 +59,16 @@ impl PgRuRepository {
 impl ReinforcementUnitRepository for PgRuRepository {
     async fn create(
         &self,
+        user_id: Uuid,
         concept_id: Uuid,
         claim: &str,
         context: &str,
     ) -> Result<ReinforcementUnit, DomainError> {
+        // INSERT ... SELECT so the row only exists if the concept is owned.
         let row = sqlx::query!(
             r#"
             INSERT INTO reinforcement_units (concept_id, claim, context)
-            VALUES ($1, $2, $3)
+            SELECT c.id, $2, $3 FROM concepts c WHERE c.id = $1 AND c.user_id = $4
             RETURNING
                 id, concept_id, claim, context, claim_id, dependency_cost,
                 state::TEXT AS state,
@@ -76,10 +78,12 @@ impl ReinforcementUnitRepository for PgRuRepository {
             concept_id,
             claim,
             context,
+            user_id,
         )
-        .fetch_one(&self.pool)
+        .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DomainError::Repository(e.to_string()))?;
+        .map_err(|e| DomainError::Repository(e.to_string()))?
+        .ok_or_else(|| DomainError::NotFound(format!("concept {concept_id}")))?;
 
         Self::map_row(
             row.id, row.concept_id, row.claim, row.context,
@@ -93,6 +97,7 @@ impl ReinforcementUnitRepository for PgRuRepository {
 
     async fn create_with_source(
         &self,
+        user_id: Uuid,
         concept_id: Uuid,
         claim: &str,
         context: &str,
@@ -102,7 +107,7 @@ impl ReinforcementUnitRepository for PgRuRepository {
         let row = sqlx::query(
             r#"
             INSERT INTO reinforcement_units (concept_id, claim, context, source_resource_id, claim_id)
-            VALUES ($1, $2, $3, $4, $5)
+            SELECT c.id, $2, $3, $4, $5 FROM concepts c WHERE c.id = $1 AND c.user_id = $6
             RETURNING
                 id, concept_id, claim, context, claim_id, dependency_cost,
                 state::TEXT AS state,
@@ -115,9 +120,11 @@ impl ReinforcementUnitRepository for PgRuRepository {
         .bind(context)
         .bind(source_resource_id)
         .bind(claim_id)
-        .fetch_one(&self.pool)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
         .await
-        .map_err(|e: sqlx::Error| DomainError::Repository(e.to_string()))?;
+        .map_err(|e: sqlx::Error| DomainError::Repository(e.to_string()))?
+        .ok_or_else(|| DomainError::NotFound(format!("concept {concept_id}")))?;
 
         use sqlx::Row;
         Self::map_row(
@@ -140,7 +147,7 @@ impl ReinforcementUnitRepository for PgRuRepository {
         )
     }
 
-    async fn find_by_id(&self, id: Uuid) -> Result<ReinforcementUnit, DomainError> {
+    async fn find_by_id(&self, id: Uuid, user_id: Uuid) -> Result<ReinforcementUnit, DomainError> {
         let row = sqlx::query!(
             r#"
             SELECT
@@ -154,11 +161,13 @@ impl ReinforcementUnitRepository for PgRuRepository {
                     '{}'
                 ) AS "dependencies!"
             FROM reinforcement_units ru
+            JOIN concepts c ON c.id = ru.concept_id
             LEFT JOIN ru_dependencies rd ON rd.ru_id = ru.id
-            WHERE ru.id = $1
+            WHERE ru.id = $1 AND c.user_id = $2
             GROUP BY ru.id
             "#,
             id,
+            user_id,
         )
         .fetch_optional(&self.pool)
         .await
@@ -177,6 +186,7 @@ impl ReinforcementUnitRepository for PgRuRepository {
 
     async fn list(
         &self,
+        user_id: Uuid,
         concept_id: Option<Uuid>,
         state: Option<&str>,
     ) -> Result<Vec<ReinforcementUnit>, DomainError> {
@@ -193,12 +203,15 @@ impl ReinforcementUnitRepository for PgRuRepository {
                     '{}'
                 ) AS "dependencies!"
             FROM reinforcement_units ru
+            JOIN concepts c ON c.id = ru.concept_id
             LEFT JOIN ru_dependencies rd ON rd.ru_id = ru.id
-            WHERE ($1::uuid IS NULL OR ru.concept_id = $1)
-              AND ($2::TEXT IS NULL OR ru.state::TEXT = $2)
+            WHERE c.user_id = $1
+              AND ($2::uuid IS NULL OR ru.concept_id = $2)
+              AND ($3::TEXT IS NULL OR ru.state::TEXT = $3)
             GROUP BY ru.id
             ORDER BY ru.created_at ASC
             "#,
+            user_id,
             concept_id,
             state,
         )
@@ -223,6 +236,7 @@ impl ReinforcementUnitRepository for PgRuRepository {
     async fn update_after_review(
         &self,
         id: Uuid,
+        user_id: Uuid,
         state: &str,
         stability_score: f64,
         reinforcement_count: i32,
@@ -241,6 +255,7 @@ impl ReinforcementUnitRepository for PgRuRepository {
                 due_at              = $7,
                 last_reinforced     = now()
             WHERE id = $1
+              AND concept_id IN (SELECT id FROM concepts WHERE user_id = $8)
             RETURNING
                 id, concept_id, claim, context, claim_id, dependency_cost,
                 state::TEXT AS state,
@@ -255,6 +270,7 @@ impl ReinforcementUnitRepository for PgRuRepository {
         .bind(ease_factor)
         .bind(interval_days)
         .bind(due_at)
+        .bind(user_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e: sqlx::Error| DomainError::Repository(e.to_string()))?

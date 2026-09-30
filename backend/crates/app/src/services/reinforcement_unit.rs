@@ -18,6 +18,7 @@ impl<R: ReinforcementUnitRepository> RuService<R> {
 
     pub async fn create(
         &self,
+        user_id: Uuid,
         req: CreateRuRequest,
     ) -> Result<Vec<RuResponse>, AppError> {
         let concept_id = Uuid::parse_str(&req.concept_id)
@@ -34,7 +35,7 @@ impl<R: ReinforcementUnitRepository> RuService<R> {
         for item in &req.items {
             let ru = self
                 .repo
-                .create_with_source(concept_id, &item.claim, &item.context, source_id, None)
+                .create_with_source(user_id, concept_id, &item.claim, &item.context, source_id, None)
                 .await?;
             created.push(RuResponse::from(ru));
         }
@@ -43,24 +44,26 @@ impl<R: ReinforcementUnitRepository> RuService<R> {
 
     pub async fn list(
         &self,
+        user_id: Uuid,
         concept_id: Option<Uuid>,
         state: Option<&str>,
     ) -> Result<Vec<RuResponse>, AppError> {
-        let rus = self.repo.list(concept_id, state).await?;
+        let rus = self.repo.list(user_id, concept_id, state).await?;
         Ok(rus.into_iter().map(RuResponse::from).collect())
     }
 
-    pub async fn get(&self, id: Uuid) -> Result<RuResponse, AppError> {
-        let ru = self.repo.find_by_id(id).await?;
+    pub async fn get(&self, id: Uuid, user_id: Uuid) -> Result<RuResponse, AppError> {
+        let ru = self.repo.find_by_id(id, user_id).await?;
         Ok(RuResponse::from(ru))
     }
 
     pub async fn update_after_review(
         &self,
         id: Uuid,
+        user_id: Uuid,
         req: UpdateRuRequest,
     ) -> Result<RuResponse, AppError> {
-        let current = self.repo.find_by_id(id).await?;
+        let current = self.repo.find_by_id(id, user_id).await?;
 
         let new_state = if let Some(ref s) = req.state {
             RuState::try_from(s.as_str())
@@ -82,6 +85,7 @@ impl<R: ReinforcementUnitRepository> RuService<R> {
             .repo
             .update_after_review(
                 id,
+                user_id,
                 &new_state.to_string(),
                 stability,
                 count,

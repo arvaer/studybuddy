@@ -37,7 +37,7 @@ async fn seed(pool: &PgPool) -> Fixture {
         .await
         .unwrap();
     let ru = PgRuRepository::new(pool.clone())
-        .create(concept.id, "P(A|B) = P(B|A)P(A)/P(B)", "")
+        .create(owner, concept.id, "P(A|B) = P(B|A)P(A)/P(B)", "")
         .await
         .unwrap();
     let question = PgQuestionRepository::new(pool.clone())
@@ -59,8 +59,8 @@ fn answer(text: &str) -> AnswerRequest {
     AnswerRequest { answer: text.to_string() }
 }
 
-async fn review_state(pool: &PgPool, ru: Uuid) -> (i32, String) {
-    let r = PgRuRepository::new(pool.clone()).find_by_id(ru).await.unwrap();
+async fn review_state(pool: &PgPool, owner: Uuid, ru: Uuid) -> (i32, String) {
+    let r = PgRuRepository::new(pool.clone()).find_by_id(ru, owner).await.unwrap();
     (r.reinforcement_count, r.state.to_string())
 }
 
@@ -74,13 +74,13 @@ async fn owner_can_answer_and_review_state_advances(pool: PgPool) {
         .expect("owner answers");
 
     assert!(res.is_correct);
-    assert_eq!(review_state(&pool, f.ru).await.0, 1);
+    assert_eq!(review_state(&pool, f.owner, f.ru).await.0, 1);
 }
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn other_learner_is_refused_and_review_state_is_untouched(pool: PgPool) {
     let f = seed(&pool).await;
-    let before = review_state(&pool, f.ru).await;
+    let before = review_state(&pool, f.owner, f.ru).await;
 
     let res = service(&pool)
         .submit_answer(f.other, f.question, answer("anything"))
@@ -90,7 +90,7 @@ async fn other_learner_is_refused_and_review_state_is_untouched(pool: PgPool) {
         matches!(res, Err(AppError::Domain(DomainError::NotFound(_)))),
         "expected NotFound, got {res:?}"
     );
-    assert_eq!(review_state(&pool, f.ru).await, before);
+    assert_eq!(review_state(&pool, f.owner, f.ru).await, before);
 }
 
 #[sqlx::test(migrations = "../../migrations")]

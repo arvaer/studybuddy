@@ -137,9 +137,13 @@ pub trait ConceptRepository: Send + Sync {
 
 // ─── ReinforcementUnitRepository ─────────────────────────────────────────────
 
+/// Every method takes the acting learner's `user_id`. Ownership is resolved
+/// through `reinforcement_units.concept_id -> concepts.user_id` inside the SQL
+/// predicate; a foreign or nonexistent RU (or concept, on create) is `NotFound`.
 pub trait ReinforcementUnitRepository: Send + Sync {
     fn create(
         &self,
+        user_id: Uuid,
         concept_id: Uuid,
         claim: &str,
         context: &str,
@@ -147,6 +151,7 @@ pub trait ReinforcementUnitRepository: Send + Sync {
 
     fn create_with_source(
         &self,
+        user_id: Uuid,
         concept_id: Uuid,
         claim: &str,
         context: &str,
@@ -157,10 +162,12 @@ pub trait ReinforcementUnitRepository: Send + Sync {
     fn find_by_id(
         &self,
         id: Uuid,
+        user_id: Uuid,
     ) -> impl std::future::Future<Output = Result<ReinforcementUnit, DomainError>> + Send;
 
     fn list(
         &self,
+        user_id: Uuid,
         concept_id: Option<Uuid>,
         state: Option<&str>,
     ) -> impl std::future::Future<Output = Result<Vec<ReinforcementUnit>, DomainError>> + Send;
@@ -168,6 +175,7 @@ pub trait ReinforcementUnitRepository: Send + Sync {
     fn update_after_review(
         &self,
         id: Uuid,
+        user_id: Uuid,
         state: &str,
         stability_score: f64,
         reinforcement_count: i32,
