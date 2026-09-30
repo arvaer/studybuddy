@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT r.id, r.activity_id, r.revision, r.prompt, r.options, r.answer_key, r.rubric\n            FROM activity_revisions r\n            JOIN activities a ON a.id = r.activity_id\n            WHERE r.id = $1 AND a.user_id = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "activity_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "revision",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "prompt",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "options",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "answer_key",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "rubric",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "11711e692df7f7243322386ce729b3231460ada2d4b08c7fa5ed60e22026c7d7"
+}

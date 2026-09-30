@@ -462,3 +462,23 @@ pub trait ProgressRepository: Send + Sync {
         user_id: Uuid,
     ) -> impl std::future::Future<Output = Result<LearnerProgress, DomainError>> + Send;
 }
+
+// ─── AttemptRepository ───────────────────────────────────────────────────────
+
+/// The one operation that records learning evidence (#9). The adapter owns
+/// the transaction: it verifies the revision belongs to the caller, inserts
+/// the attempt, applies `learning::assess`, inserts the assessment if there
+/// is one, and commits all of it or none of it.
+pub trait AttemptRepository: Send + Sync {
+    fn record(
+        &self,
+        cmd: crate::learning::RecordAttempt,
+    ) -> impl std::future::Future<Output = Result<crate::learning::AttemptReceipt, DomainError>> + Send;
+
+    /// The receipt for an attempt the caller owns; foreign is `NotFound`.
+    fn find_receipt(
+        &self,
+        attempt_id: Uuid,
+        user_id: Uuid,
+    ) -> impl std::future::Future<Output = Result<crate::learning::AttemptReceipt, DomainError>> + Send;
+}
