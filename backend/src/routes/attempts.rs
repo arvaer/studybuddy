@@ -21,14 +21,17 @@ pub fn router() -> Router<AppState> {
         .route("/attempts/{id}", get(get_one))
 }
 
-/// Record an attempt against an owned activity revision (#9).
+/// Record an attempt against an owned activity revision (#9). A resent
+/// request key replays the earlier receipt with 200 instead of 201 (#10).
 async fn record(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Json(req): Json<RecordAttemptRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
     let svc = AttemptService::new(PgAttemptRepository::new(state.pool));
-    Ok((StatusCode::CREATED, Json(svc.record(user_id, req).await?)))
+    let recorded = svc.record(user_id, req).await?;
+    let status = if recorded.replayed { StatusCode::OK } else { StatusCode::CREATED };
+    Ok((status, Json(recorded.receipt)))
 }
 
 async fn get_one(

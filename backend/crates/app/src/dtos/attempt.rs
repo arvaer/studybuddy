@@ -8,6 +8,10 @@ use domain::learning::{Assessment, AttemptReceipt};
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RecordAttemptRequest {
+    /// Chosen by the client once per submission (a UUID is fine) and resent
+    /// on retry. Same key and payload replays the receipt; same key with a
+    /// different payload is refused (#10).
+    pub request_key:          String,
     pub activity_revision_id: Uuid,
     /// The answer as submitted: a string for keyed activities, any JSON
     /// otherwise.
@@ -16,6 +20,14 @@ pub struct RecordAttemptRequest {
     /// given; an empty list means unaided.
     #[serde(default)]
     pub assistance:           Vec<Value>,
+}
+
+/// What `record` hands back: the receipt plus whether it was replayed, so
+/// the route can answer 200 instead of 201.
+#[derive(Debug)]
+pub struct RecordedAttempt {
+    pub receipt:  AttemptReceiptResponse,
+    pub replayed: bool,
 }
 
 #[derive(Debug, Serialize)]

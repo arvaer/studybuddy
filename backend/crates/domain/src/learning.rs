@@ -1,4 +1,4 @@
-//! Learning records: activity revisions, attempts and assessments (#8, #9).
+//! Learning records: activity revisions, attempts and assessments (#8, #9, #10).
 //!
 //! The assessment rule lives here, in one place, so the storage adapter and
 //! any future provider cannot grade differently.
@@ -90,12 +90,35 @@ pub struct Assessment {
 }
 
 /// What the caller asked to record. `user_id` is the authenticated learner.
+/// `request_key` is chosen by the client per submission and is unique per
+/// learner; resending it replays the receipt instead of recording again.
 #[derive(Debug, Clone)]
 pub struct RecordAttempt {
     pub user_id:              Uuid,
+    pub request_key:          String,
     pub activity_revision_id: Uuid,
     pub response:             Value,
     pub assistance:           Vec<Value>,
+}
+
+impl RecordAttempt {
+    /// The idempotency rule (#10): a resent key is a replay only when the
+    /// revision, the response and the assistance are all identical. JSON
+    /// equality is structural, so key order does not matter but `"1"` and
+    /// `1` do.
+    pub fn same_payload(&self, activity_revision_id: Uuid, response: &Value, assistance: &Value) -> bool {
+        self.activity_revision_id == activity_revision_id
+            && &self.response == response
+            && Value::Array(self.assistance.clone()) == *assistance
+    }
+}
+
+/// The result of `record`: the receipt, and whether it was replayed from an
+/// earlier submission with the same request key rather than newly written.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Recorded {
+    pub receipt:  AttemptReceipt,
+    pub replayed: bool,
 }
 
 /// The persisted outcome of a submission. `assessment` is `None` while the
@@ -189,6 +212,22 @@ mod tests {
         assert_eq!(assess(&rev, &json!("Value")).unwrap().unwrap().outcome, AssessmentOutcome::Correct);
         assert_eq!(assess(&rev, &json!("Reward")).unwrap().unwrap().outcome, AssessmentOutcome::Incorrect);
         assert!(matches!(assess(&rev, &json!("value")), Err(DomainError::Validation(_))));
+    }
+
+    #[test]
+    fn same_payload_compares_revision_response_and_assistance() {
+        let rev = Uuid::new_v4();
+        let cmd = RecordAttempt {
+            user_id: Uuid::nil(),
+            request_key: "k".into(),
+            activity_revision_id: rev,
+            response: json!({"a": 1, "b": [1, 2]}),
+            assistance: vec![json!("hint")],
+        };
+        assert!(cmd.same_payload(rev, &json!({"b": [1, 2], "a": 1}), &json!(["hint"])));
+        assert!(!cmd.same_payload(Uuid::new_v4(), &cmd.response, &json!(["hint"])));
+        assert!(!cmd.same_payload(rev, &json!({"a": "1", "b": [1, 2]}), &json!(["hint"])));
+        assert!(!cmd.same_payload(rev, &cmd.response, &json!([])));
     }
 
     #[test]
