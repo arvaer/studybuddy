@@ -86,6 +86,9 @@ impl ConceptRepository for PgConceptRepository {
         name: &str,
         description: &str,
     ) -> Result<Concept, DomainError> {
+        super::owned::topic(&self.pool, user_id, topic_id).await?;
+        super::owned::concepts(&self.pool, user_id, parent_id.as_slice()).await?;
+
         let row = sqlx::query!(
             r#"
             INSERT INTO concepts (user_id, topic_id, parent_id, name, description)
@@ -188,6 +191,9 @@ impl ConceptRepository for PgConceptRepository {
         name: Option<&str>,
         description: Option<&str>,
     ) -> Result<Concept, DomainError> {
+        super::owned::topic(&self.pool, user_id, topic_id.flatten()).await?;
+        super::owned::concepts(&self.pool, user_id, parent_id.flatten().as_slice()).await?;
+
         let row = sqlx::query!(
             r#"
             UPDATE concepts SET

@@ -40,6 +40,8 @@ impl StudySessionRepository for PgStudySessionRepository {
         session_type: &str,
         concept_ids: &[Uuid],
     ) -> Result<StudySession, DomainError> {
+        super::owned::concepts(&self.pool, user_id, concept_ids).await?;
+
         let row = sqlx::query(
             r#"
             INSERT INTO study_sessions (user_id, title, session_type)

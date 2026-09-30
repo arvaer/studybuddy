@@ -2,6 +2,7 @@ pub mod claim;
 pub mod concept;
 pub mod event;
 pub mod note;
+pub mod owned;
 pub mod progress;
 pub mod question;
 pub mod quiz_session;

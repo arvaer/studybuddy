@@ -26,6 +26,9 @@ impl NoteRepository for PgNoteRepository {
         is_ai_generated: bool,
         anchor_position: Option<i32>,
     ) -> Result<Note, DomainError> {
+        super::owned::concepts(&self.pool, user_id, &[concept_id]).await?;
+        super::owned::reinforcement_unit(&self.pool, user_id, ru_id).await?;
+
         sqlx::query_as!(
             Note,
             r#"
