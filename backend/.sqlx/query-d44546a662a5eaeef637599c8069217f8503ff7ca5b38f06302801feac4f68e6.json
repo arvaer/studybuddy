@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT a.id, a.user_id, a.concept_id, a.kind::TEXT AS \"kind!\", a.created_at,\n                   r.id AS r_id, r.revision AS r_revision, r.prompt AS r_prompt, r.options AS r_options,\n                   r.answer_key AS r_answer_key, r.rubric AS r_rubric,\n                   r.source_resource_id AS r_source_resource_id, r.source_location AS r_source_location,\n                   r.created_at AS r_created_at\n            FROM activities a\n            JOIN LATERAL (\n                SELECT * FROM activity_revisions WHERE activity_id = a.id ORDER BY revision DESC LIMIT 1\n            ) r ON true\n            WHERE a.user_id = $1 AND ($2::uuid IS NULL OR a.id = $2)\n            ORDER BY a.created_at DESC, a.id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "concept_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "r_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "r_revision",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "r_prompt",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "r_options",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "r_answer_key",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "r_rubric",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "r_source_resource_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 12,
+        "name": "r_source_location",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 13,
+        "name": "r_created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "d44546a662a5eaeef637599c8069217f8503ff7ca5b38f06302801feac4f68e6"
+}

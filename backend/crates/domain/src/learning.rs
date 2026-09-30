@@ -1,4 +1,5 @@
-//! Learning records: activity revisions, attempts and assessments (#8, #9, #10).
+//! Learning records: activities, revisions, attempts and assessments
+//! (#8, #9, #10, #41).
 //!
 //! The assessment rule lives here, in one place, so the storage adapter and
 //! any future provider cannot grade differently.
@@ -10,17 +11,135 @@ use uuid::Uuid;
 
 use crate::errors::DomainError;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityKind {
+    Recall,
+    Explain,
+    Apply,
+    Diagnose,
+}
+
+impl ActivityKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Recall => "recall",
+            Self::Explain => "explain",
+            Self::Apply => "apply",
+            Self::Diagnose => "diagnose",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "recall" => Some(Self::Recall),
+            "explain" => Some(Self::Explain),
+            "apply" => Some(Self::Apply),
+            "diagnose" => Some(Self::Diagnose),
+            _ => None,
+        }
+    }
+}
+
+/// A stable, owned practice item. Content lives in its revisions.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Activity {
+    pub id:         Uuid,
+    pub user_id:    Uuid,
+    pub concept_id: Option<Uuid>,
+    pub kind:       ActivityKind,
+    pub created_at: DateTime<Utc>,
+}
+
 /// The exact content a learner was shown. Loaded by the storage adapter
 /// only after the ownership predicate has passed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ActivityRevision {
-    pub id:          Uuid,
+    pub id:                 Uuid,
+    pub activity_id:        Uuid,
+    pub revision:           i32,
+    pub prompt:             String,
+    pub options:            Option<Vec<String>>,
+    pub answer_key:         Option<Value>,
+    pub rubric:             Option<String>,
+    pub source_resource_id: Option<Uuid>,
+    pub source_location:    Option<Value>,
+    pub created_at:         DateTime<Utc>,
+}
+
+/// An activity with the revision a learner selecting it today would see.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActivityWithRevision {
+    pub activity: Activity,
+    pub current:  ActivityRevision,
+}
+
+/// What an author supplies for one revision (#41). Validated here so the
+/// assessment rule in `assess` always finds a shape it understands.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RevisionContent {
+    pub prompt:             String,
+    pub options:            Option<Vec<String>>,
+    pub answer_key:         Option<Value>,
+    pub rubric:             Option<String>,
+    pub source_resource_id: Option<Uuid>,
+    pub source_location:    Option<Value>,
+}
+
+pub const PROMPT_MAX_LEN: usize = 10_000;
+
+impl RevisionContent {
+    /// - The prompt is non-empty after trimming and at most `PROMPT_MAX_LEN`.
+    /// - Options, if given, are at least two distinct non-empty strings, and
+    ///   the answer key must then be a string naming one of them.
+    /// - A source location needs a source resource to locate within.
+    pub fn validate(&self) -> Result<(), DomainError> {
+        let prompt = self.prompt.trim();
+        if prompt.is_empty() {
+            return Err(DomainError::Validation("prompt is required".into()));
+        }
+        if prompt.len() > PROMPT_MAX_LEN {
+            return Err(DomainError::Validation(format!("prompt exceeds {PROMPT_MAX_LEN} characters")));
+        }
+        if let Some(options) = &self.options {
+            if options.len() < 2 {
+                return Err(DomainError::Validation("options need at least two entries".into()));
+            }
+            if options.iter().any(|o| o.trim().is_empty()) {
+                return Err(DomainError::Validation("options must not be blank".into()));
+            }
+            let mut seen = std::collections::HashSet::new();
+            if !options.iter().all(|o| seen.insert(o)) {
+                return Err(DomainError::Validation("options must be distinct".into()));
+            }
+            match &self.answer_key {
+                Some(Value::String(key)) if options.contains(key) => {}
+                _ => return Err(DomainError::Validation("answerKey must be one of the options".into())),
+            }
+        }
+        if self.source_location.is_some() && self.source_resource_id.is_none() {
+            return Err(DomainError::Validation("sourceLocation needs a sourceResourceId".into()));
+        }
+        Ok(())
+    }
+}
+
+/// Create an activity with its first revision. `user_id` owns the activity
+/// and must own the linked concept and source resource, if any.
+#[derive(Debug, Clone)]
+pub struct NewActivity {
+    pub user_id:    Uuid,
+    pub kind:       ActivityKind,
+    pub concept_id: Option<Uuid>,
+    pub content:    RevisionContent,
+}
+
+/// Add a revision to an owned activity. Earlier revisions are untouched.
+#[derive(Debug, Clone)]
+pub struct NewRevision {
+    pub user_id:     Uuid,
     pub activity_id: Uuid,
-    pub revision:    i32,
-    pub prompt:      String,
-    pub options:     Option<Vec<String>>,
-    pub answer_key:  Option<Value>,
-    pub rubric:      Option<String>,
+    pub content:     RevisionContent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,6 +312,42 @@ mod tests {
             options: options.map(|o| o.into_iter().map(String::from).collect()),
             answer_key,
             rubric: None,
+            source_resource_id: None,
+            source_location: None,
+            created_at: Utc::now(),
+        }
+    }
+
+    fn content(options: Option<Vec<&str>>, answer_key: Option<Value>) -> RevisionContent {
+        RevisionContent {
+            prompt: "What does a policy specify?".into(),
+            options: options.map(|o| o.into_iter().map(String::from).collect()),
+            answer_key,
+            rubric: None,
+            source_resource_id: None,
+            source_location: None,
+        }
+    }
+
+    #[test]
+    fn revision_content_rules() {
+        assert!(content(None, None).validate().is_ok());
+        assert!(content(None, Some(json!("policy"))).validate().is_ok());
+        assert!(content(Some(vec!["Reward", "Value"]), Some(json!("Value"))).validate().is_ok());
+
+        let bad = [
+            RevisionContent { prompt: "  ".into(), ..content(None, None) },
+            RevisionContent { prompt: "x".repeat(PROMPT_MAX_LEN + 1), ..content(None, None) },
+            content(Some(vec!["Only"]), Some(json!("Only"))),
+            content(Some(vec!["A", " "]), Some(json!("A"))),
+            content(Some(vec!["A", "A"]), Some(json!("A"))),
+            content(Some(vec!["A", "B"]), None),
+            content(Some(vec!["A", "B"]), Some(json!("C"))),
+            content(Some(vec!["A", "B"]), Some(json!(["A"]))),
+            RevisionContent { source_location: Some(json!({"page": 3})), ..content(None, None) },
+        ];
+        for c in bad {
+            assert!(matches!(c.validate(), Err(DomainError::Validation(_))), "{c:?}");
         }
     }
 

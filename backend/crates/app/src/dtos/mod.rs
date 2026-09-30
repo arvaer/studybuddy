@@ -1,3 +1,4 @@
+pub mod activity;
 pub mod attempt;
 pub mod auth;
 pub mod claim;

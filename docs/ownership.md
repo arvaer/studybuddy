@@ -31,6 +31,7 @@ Status after #3 (questions), #4 (reinforcement units) and #29 (linked ids). "Own
 | `GET /api/progress` | yes | all CTEs filter on `user_id` |
 | `GET/PATCH /api/settings` | yes | keyed by `user_id` |
 | `GET /api/auth/me`, `POST /api/auth/{login,register,refresh,logout}` | n/a | identity itself; reviewed under #5/#6 |
+| `POST /api/activities`, `GET /api/activities`, `GET /api/activities/{id}`, `POST /api/activities/{id}/revisions`, `GET /api/revisions/{id}` | yes | `activities.user_id` in every predicate; revisions read through their activity; linked `concept_id`/`source_resource_id` checked with `owned::concepts`/`owned::resource` (#41) |
 | `POST /api/attempts`, `GET /api/attempts/{id}` | yes | revision loaded through `activities.user_id` inside the transaction; receipt lookup predicates on `attempts.user_id` (#9) |
 | `POST /api/llm/*` | n/a | no owned records; provider, model, key and destination are server configuration (#6) |
 

@@ -112,7 +112,8 @@ impl AttemptRepository for PgAttemptRepository {
         // and nothing below runs.
         let row = sqlx::query!(
             r#"
-            SELECT r.id, r.activity_id, r.revision, r.prompt, r.options, r.answer_key, r.rubric
+            SELECT r.id, r.activity_id, r.revision, r.prompt, r.options, r.answer_key, r.rubric,
+                   r.source_resource_id, r.source_location, r.created_at
             FROM activity_revisions r
             JOIN activities a ON a.id = r.activity_id
             WHERE r.id = $1 AND a.user_id = $2
@@ -135,6 +136,9 @@ impl AttemptRepository for PgAttemptRepository {
             })?,
             answer_key:  row.answer_key,
             rubric:      row.rubric,
+            source_resource_id: row.source_resource_id,
+            source_location: row.source_location,
+            created_at:  row.created_at,
         };
 
         // The domain rule runs before any write, so a validation failure

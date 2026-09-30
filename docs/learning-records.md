@@ -1,6 +1,6 @@
 # Learning records
 
-Schema landed by issue #8 (migration `20240105000000_learning_records.sql`); the recording operation by #9; idempotent submission by request key by #10. Authoring activities is #41. The existing quiz and question tables keep working until the frontend moves over (#13).
+Schema landed by issue #8 (migration `20240105000000_learning_records.sql`); the recording operation by #9; idempotent submission by request key by #10; authoring by #41. The existing quiz and question tables keep working until the frontend moves over (#13).
 
 ## Tables
 
@@ -25,6 +25,22 @@ Immutability is enforced by a `BEFORE UPDATE` trigger on the three record tables
 ## Ownership
 
 `activities.user_id` is the root. `attempts.user_id` is denormalised so predicates stay one join short; the recording operation (#9) must verify it equals the activity's owner. The schema does not enforce that equality, and the ownership convention in [ownership.md](ownership.md) applies.
+
+## Authoring (#41)
+
+| Route | Does |
+| --- | --- |
+| `POST /api/activities` | `{kind, conceptId?, revision: {prompt, options?, answerKey?, rubric?, sourceResourceId?, sourceLocation?}}` creates the activity and revision 1 in one transaction. 201. |
+| `POST /api/activities/{id}/revisions` | Same revision body; adds the next revision to an owned activity. 201. |
+| `GET /api/activities` | The learner's activities, newest first, each with its `current` (highest-numbered) revision. |
+| `GET /api/activities/{id}` | One activity with its current revision. |
+| `GET /api/revisions/{id}` | One exact revision, the thing an attempt cites. |
+
+Content rules (`RevisionContent::validate` in the domain crate): the prompt is required and at most 10 000 characters; options, if given, are at least two distinct non-blank strings and the answer key must then be one of them; a source location needs a source resource. `kind` is `recall`, `explain`, `apply` or `diagnose`.
+
+**The answer key and rubric are write-only.** Read responses carry `hasAnswerKey` instead, so the client answering an item never receives its key. The linked concept and source resource must be the caller's; a foreign one is `NotFound` before any row is written.
+
+Revising locks the activity row (`SELECT ... FOR UPDATE`) and then reads `max(revision) + 1` in a **separate statement**. Under READ COMMITTED the snapshot is taken before the lock wait, so a `max()` inside the locking statement reads a stale count; the concurrency test in `authoring.rs` caught exactly that. Earlier revisions are never touched, and attempts keep pointing at the revision they answered.
 
 ## Recording an attempt (#9)
 
@@ -51,6 +67,6 @@ The payload rule is `RecordAttempt::same_payload` in the domain crate. The repla
 
 The rule in step 2 lives only in the domain crate; the adapter calls it and must not grade in SQL. Model and manual assessment methods are reserved in the enum for later work and are not produced by this operation.
 
-Tests: `backend/crates/infra/tests/learning_records_schema.rs` (schema), `record_attempt.rs` (operation, including a forced failure after the attempt insert that proves rollback) and `idempotent_submission.rs` (replay, conflict, per-learner scope, key validation, twelve concurrent duplicates). The rule itself is unit-tested in `backend/crates/domain/src/learning.rs`.
+Tests: `backend/crates/infra/tests/learning_records_schema.rs` (schema), `authoring.rs` (create, revise, two learners, validation, eight concurrent revisions), `record_attempt.rs` (operation, including a forced failure after the attempt insert that proves rollback) and `idempotent_submission.rs` (replay, conflict, per-learner scope, key validation, twelve concurrent duplicates). The rule itself is unit-tested in `backend/crates/domain/src/learning.rs`.
 
 Not in this operation: the learner's review schedule is not updated. The old `POST /api/questions/{id}/answer` still mutates RU state directly; retiring it is part of the frontend cutover (#13) and deletion workstream.

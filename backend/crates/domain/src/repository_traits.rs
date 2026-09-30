@@ -486,3 +486,43 @@ pub trait AttemptRepository: Send + Sync {
         user_id: Uuid,
     ) -> impl std::future::Future<Output = Result<crate::learning::AttemptReceipt, DomainError>> + Send;
 }
+
+// ─── ActivityRepository ──────────────────────────────────────────────────────
+
+/// Authoring and reading activities (#41). Every method predicates on the
+/// caller's `user_id`; a foreign activity, revision, concept or source
+/// resource is `NotFound`. Content is validated by the domain before it
+/// reaches the adapter.
+pub trait ActivityRepository: Send + Sync {
+    /// The activity and revision 1, written together.
+    fn create(
+        &self,
+        cmd: crate::learning::NewActivity,
+    ) -> impl std::future::Future<Output = Result<crate::learning::ActivityWithRevision, DomainError>> + Send;
+
+    /// The next revision of an owned activity. Concurrent calls get
+    /// distinct numbers; earlier revisions and their attempts are untouched.
+    fn revise(
+        &self,
+        cmd: crate::learning::NewRevision,
+    ) -> impl std::future::Future<Output = Result<crate::learning::ActivityRevision, DomainError>> + Send;
+
+    /// The caller's activities, each with its current revision, newest first.
+    fn list(
+        &self,
+        user_id: Uuid,
+    ) -> impl std::future::Future<Output = Result<Vec<crate::learning::ActivityWithRevision>, DomainError>> + Send;
+
+    fn find(
+        &self,
+        activity_id: Uuid,
+        user_id: Uuid,
+    ) -> impl std::future::Future<Output = Result<crate::learning::ActivityWithRevision, DomainError>> + Send;
+
+    /// One exact revision, through its activity's owner.
+    fn find_revision(
+        &self,
+        revision_id: Uuid,
+        user_id: Uuid,
+    ) -> impl std::future::Future<Output = Result<crate::learning::ActivityRevision, DomainError>> + Send;
+}

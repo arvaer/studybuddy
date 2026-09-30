@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT r.id, r.activity_id, r.revision, r.prompt, r.options, r.answer_key, r.rubric\n            FROM activity_revisions r\n            JOIN activities a ON a.id = r.activity_id\n            WHERE r.id = $1 AND a.user_id = $2\n            ",
+  "query": "\n            SELECT r.id, r.activity_id, r.revision, r.prompt, r.options, r.answer_key, r.rubric,\n                   r.source_resource_id, r.source_location, r.created_at\n            FROM activity_revisions r\n            JOIN activities a ON a.id = r.activity_id\n            WHERE r.id = $1 AND a.user_id = $2\n            ",
   "describe": {
     "columns": [
       {
@@ -37,6 +37,21 @@
         "ordinal": 6,
         "name": "rubric",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "source_resource_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "source_location",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
@@ -52,8 +67,11 @@
       false,
       true,
       true,
-      true
+      true,
+      true,
+      true,
+      false
     ]
   },
-  "hash": "11711e692df7f7243322386ce729b3231460ada2d4b08c7fa5ed60e22026c7d7"
+  "hash": "f07cc1a8eb65b744e288fe3bf9e827f3413ee546656626c199fdf149b27d4e6b"
 }
