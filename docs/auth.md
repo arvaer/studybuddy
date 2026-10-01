@@ -31,16 +31,19 @@ Cross-site protection relies on `SameSite=Lax` plus every state-changing route b
 
 ## Frontend behaviour
 
-On load the app calls `GET /api/auth/me` with the cookie; a 401 means signed out. Login and signup set the cookies and return the user. **The frontend never calls refresh**, so a session effectively ends 15 minutes after the last login; that is issue #35.
+On load the app calls `GET /api/auth/me` with the cookie. Login and signup set the cookies and return the user.
+
+Every API call goes through `sessionFetch` (`frontend/src/lib/session.ts`, #35). On a 401 it calls `POST /api/auth/refresh` once, with concurrent 401s sharing that one refresh, and retries the original request. So a learner whose access token has expired but whose refresh cookie is still valid (up to 7 days) stays signed in, including on a return visit, because `/api/auth/me` is retried the same way. If the refresh fails the session is over: `onSessionExpired` listeners fire, the auth context clears the user (which sends protected routes to the login page), and the caller gets the original 401. The auth routes themselves are never retried: a 401 from login is a wrong password, a 401 from refresh is the end of the session. `session.test.ts` pins the retry, the shared refresh, the expiry path and the auth-route exclusion.
 
 ## Open findings
 
 | Finding | Severity | Issue |
 | --- | --- | --- |
-| Frontend never refreshes; sessions end after 15 minutes | medium | #35 |
 | `Validate` derived on every DTO, invoked only for auth | medium | #36 |
 | No rate limiting or lockout on login/signup | medium | #37 |
 | Expired refresh rows never purged; no reuse/family detection | low | #38 |
+
+Fixed in #35: the frontend never refreshed, so every session ended 15 minutes after login.
 
 Fixed in #7: declared validation not enforced on signup/login; cookies lacked `Secure` and `Max-Age`; logout's removal cookie did not match the refresh cookie's path, so the browser kept it; an unused `verify_access_token` duplicated the extractor.
 
