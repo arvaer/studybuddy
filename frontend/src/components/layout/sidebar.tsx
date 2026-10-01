@@ -8,8 +8,6 @@ import {
   Settings, 
   ChevronLeft,
   GraduationCap,
-  Flame,
-  Sparkles,
   LogOut
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -67,70 +65,6 @@ export function Sidebar() {
           )}
         </AnimatePresence>
       </div>
-
-      {/* Streak badge */}
-      <AnimatePresence mode="wait">
-        {!isCollapsed && (
-          <motion.div 
-            initial={{ opacity: 0, y: -10, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -10, scale: 0.95 }}
-            transition={{ duration: 0.2, delay: 0.1 }}
-            className="relative z-10 mx-3 mt-4"
-          >
-            <div className="relative overflow-hidden p-4 rounded-xl bg-gradient-to-br from-accent/15 via-accent/10 to-accent/5 border border-accent/20">
-              {/* Shimmer effect */}
-              <div className="absolute inset-0 shimmer" />
-              
-              <div className="relative flex items-center gap-3">
-                <motion.div
-                  animate={{ 
-                    scale: [1, 1.1, 1],
-                  }}
-                  transition={{ 
-                    duration: 2, 
-                    repeat: Infinity,
-                    ease: "easeInOut"
-                  }}
-                  className="flex items-center justify-center h-10 w-10 rounded-xl bg-accent/20"
-                >
-                  <Flame className="h-5 w-5 text-accent" />
-                </motion.div>
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-lg font-display font-bold text-foreground">7</span>
-                    <span className="text-sm font-medium text-foreground">day streak!</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Sparkles className="h-3 w-3 text-accent" />
-                    Keep the momentum
-                  </p>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Collapsed streak indicator */}
-      <AnimatePresence mode="wait">
-        {isCollapsed && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
-            className="relative z-10 mx-auto mt-4"
-          >
-            <motion.div
-              animate={{ scale: [1, 1.05, 1] }}
-              transition={{ duration: 2, repeat: Infinity }}
-              className="flex items-center justify-center h-10 w-10 rounded-xl bg-accent/15 border border-accent/20"
-            >
-              <Flame className="h-5 w-5 text-accent" />
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Navigation */}
       <nav className="relative z-10 flex-1 px-3 py-6 space-y-1">

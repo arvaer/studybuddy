@@ -312,19 +312,6 @@ export default function SettingsPage() {
 
               <div className="flex items-center justify-between">
                 <div>
-                  <Label className="text-foreground">Streak Alerts</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Don't lose your streak!
-                  </p>
-                </div>
-                <Switch
-                  checked={draft.streakAlerts}
-                  onCheckedChange={(v) => update({ streakAlerts: v })}
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
                   <Label className="text-foreground">Review Reminders</Label>
                   <p className="text-sm text-muted-foreground">
                     When concepts need reinforcement

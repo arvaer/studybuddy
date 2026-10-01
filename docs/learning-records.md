@@ -89,3 +89,14 @@ Rules the tests pin (`attempt-state.test.ts`, `activity-card.test.tsx`):
 
 Gate step 4 (refresh the page and restart the backend; the accepted activity and attempt remain) is therefore: the activity list, the revision and the attempt receipt all come from the database on load, and the only local state is the draft and the index of what was recorded.
 
+
+## What the UI no longer claims (#14)
+
+No data or policy backs a due date, a mastery judgement or a study streak, so the UI does not assert them:
+
+- Reinforcement-unit states are shown by their stored name. `stable` is labelled "Stable", not "Mastered", and topic and concept cards count units that are stable, not a mastery percentage.
+- The dashboard shows concept and unit counts only. The streak and study-time cards are gone: they were computed from `study_sessions`, which the quiz stopped writing when it moved to attempts (#13).
+- The sidebar no longer shows a hard-coded streak, and settings no longer offer streak alerts.
+- The quiz no longer opens a configuration modal. Its spaced-repetition settings, due counts and "include mastered cards" switch had no effect on which activities were served.
+
+Dead after this change, noted for the deletion ticket (#15): `frontend/src/components/quiz-config-modal.tsx`; the `QuizSessionConfig`, `SRSSettings`, `CramSettings`, `CardPriority` and `defaultQuizConfig` definitions in `frontend/src/types/study.ts`; `streakDays` and `totalStudyTime` on `LearnerProgress` and in the `/api/progress` query; `streakAlerts` on settings.

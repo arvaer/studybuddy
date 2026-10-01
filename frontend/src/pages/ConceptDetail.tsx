@@ -122,7 +122,7 @@ export default function ConceptDetail() {
     'empty': { icon: BookOpen, label: 'Not started', variant: 'default' as const },
     'needs-attention': { icon: AlertCircle, label: 'Needs review', variant: 'unstable' as const },
     'in-progress': { icon: Sparkles, label: 'Learning', variant: 'accent' as const },
-    'mastered': { icon: CheckCircle2, label: 'Mastered', variant: 'stable' as const },
+    'mastered': { icon: CheckCircle2, label: 'Stable', variant: 'stable' as const },
   };
 
   const config = statusConfig[status];
@@ -229,7 +229,7 @@ export default function ConceptDetail() {
                   <p className="text-2xl font-semibold text-foreground">
                     {reinforcementUnits.filter(ru => ru.state === 'stable').length}
                   </p>
-                  <p className="text-xs text-muted-foreground">Mastered</p>
+                  <p className="text-xs text-muted-foreground">Stable</p>
                 </div>
               </div>
             </Card>

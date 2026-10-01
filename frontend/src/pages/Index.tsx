@@ -17,8 +17,6 @@ import {
   BookOpen,
   CheckCircle2,
   AlertTriangle,
-  Clock,
-  Flame,
   TrendingUp,
   Plus,
   FileQuestion,
@@ -220,10 +218,6 @@ export default function Dashboard() {
     [activeId, concepts]
   );
 
-  const formatStudyTime = (minutes: number) => {
-    const hours = Math.floor(minutes / 60);
-    return hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
-  };
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveId(event.active.id as string);
@@ -378,23 +372,22 @@ export default function Dashboard() {
           variants={container}
           initial="hidden"
           animate="show"
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-10"
+          className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-10"
         >
           <motion.div variants={item}>
             <StatsCard
-              title="Study Streak"
-              value={progress?.streakDays ?? 0}
-              subtitle="days in a row"
-              icon={Flame}
-              variant="accent"
+              title="Concepts"
+              value={progress?.totalConcepts ?? 0}
+              subtitle="across your topics"
+              icon={BookOpen}
             />
           </motion.div>
 
           <motion.div variants={item}>
             <StatsCard
-              title="Concepts Mastered"
+              title="Stable units"
               value={progress?.stableConcepts ?? 0}
-              subtitle={`of ${progress?.totalConcepts ?? 0} total`}
+              subtitle="marked stable"
               icon={CheckCircle2}
               variant="stable"
             />
@@ -402,20 +395,11 @@ export default function Dashboard() {
 
           <motion.div variants={item}>
             <StatsCard
-              title="Needs Review"
+              title="New or unstable units"
               value={progress?.needsReinforcement ?? 0}
-              subtitle="concepts to reinforce"
+              subtitle="not yet stable"
               icon={AlertTriangle}
               variant="unstable"
-            />
-          </motion.div>
-
-          <motion.div variants={item}>
-            <StatsCard
-              title="Study Time"
-              value={formatStudyTime(progress?.totalStudyTime ?? 0)}
-              subtitle="this week"
-              icon={Clock}
             />
           </motion.div>
         </motion.div>

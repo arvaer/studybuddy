@@ -93,7 +93,7 @@ export function DroppableTopicCard({
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <span>{concepts.length} concept{concepts.length !== 1 ? 's' : ''}</span>
               <span>·</span>
-              <span>{progressPercent}% mastered</span>
+              <span>{progressPercent}% stable</span>
               <span>·</span>
               <span className="flex items-center gap-1">
                 <FileIcon className="h-3 w-3" />

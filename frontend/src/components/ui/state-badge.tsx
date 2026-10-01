@@ -31,7 +31,7 @@ const stateLabels: Record<RUState, string> = {
   reinforced: 'Learning',
   unstable: 'Needs Review',
   stabilizing: 'Improving',
-  stable: 'Mastered',
+  stable: 'Stable',
   superseded: 'Archived',
 };
 
