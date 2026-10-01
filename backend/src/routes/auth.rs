@@ -1,6 +1,9 @@
+use std::net::SocketAddr;
+use std::time::Instant;
+
 use axum::{
     Router,
-    extract::State,
+    extract::{ConnectInfo, State},
     response::IntoResponse,
     routing::{get, post},
     Json,
@@ -9,6 +12,7 @@ use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
 
 use app::dtos::auth::{LoginRequest, SignupRequest};
+use app::errors::AppError;
 use app::services::auth::{AuthService, ACCESS_TOKEN_TTL_SECS, REFRESH_TOKEN_TTL_SECS};
 use infra::repositories::user::PgUserRepository;
 
@@ -27,9 +31,11 @@ pub fn router() -> Router<AppState> {
 
 async fn signup(
     State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     jar: CookieJar,
     Json(req): Json<SignupRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
+    limit(&state, peer, &req.email)?;
     let svc = make_service(&state);
     let (resp, refresh_token) = svc.signup(req).await?;
 
@@ -39,11 +45,15 @@ async fn signup(
 
 async fn login(
     State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     jar: CookieJar,
     Json(req): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
+    limit(&state, peer, &req.email)?;
+    let email = req.email.clone();
     let svc = make_service(&state);
     let (resp, refresh_token) = svc.login(req).await?;
+    state.auth_limiter.succeeded(&email);
 
     let jar = set_cookies(jar, &resp.access_token, &refresh_token, &state);
     Ok((jar, Json(resp)))
@@ -96,6 +106,16 @@ async fn me(
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/// Count this attempt against the peer address and the email; 429 with
+/// `Retry-After` when either window is exhausted (#37). Runs before the
+/// password check so a refused attempt costs no bcrypt work.
+fn limit(state: &AppState, peer: SocketAddr, email: &str) -> Result<(), HttpError> {
+    state
+        .auth_limiter
+        .check(&peer.ip().to_string(), email, Instant::now())
+        .map_err(|wait| AppError::TooManyRequests { retry_after_secs: wait.as_secs().max(1) }.into())
+}
 
 fn make_service(state: &AppState) -> AuthService<PgUserRepository> {
     let repo = PgUserRepository::new(state.pool.clone());

@@ -36,6 +36,9 @@ Configuration is read once at startup by `backend/src/config.rs`, which is the s
 | `UPLOADS_DIR` | no | `data/uploads` (relative to the working directory) |
 | `RUST_LOG` | no | `lugia=debug,tower_http=debug` |
 | `COOKIE_SECURE` | no | `true`; set `false` only for plain-http development if your browser drops Secure cookies on localhost (see [auth.md](auth.md)) |
+| `AUTH_RATE_LIMIT_PER_IP` | no | `50` login/signup attempts per source address per window (#37) |
+| `AUTH_RATE_LIMIT_PER_EMAIL` | no | `5` attempts per email per window; a successful login clears the email's window |
+| `AUTH_RATE_LIMIT_WINDOW_SECS` | no | `900`. Over the limit answers 429 with `Retry-After`. Counters are in-process: a restart forgets them and several processes do not share them |
 | `LLM_PROVIDER` | no | unset means no model access; `POST /api/llm/proxy` answers 503. Values: `anthropic`, `openai` (also Ollama and other OpenAI-compatible servers) |
 | `LLM_API_KEY` | with a provider | none; never logged. Ollama ignores it but a placeholder is still required |
 | `LLM_MODEL` | with a provider | none |

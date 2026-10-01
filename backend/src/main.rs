@@ -93,6 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         uploads_dir: config.uploads_dir,
         cookie_secure: config.cookie_secure,
         llm,
+        auth_limiter: std::sync::Arc::new(app::services::rate_limit::AuthLimiter::new(config.auth_limits)),
     };
 
     let app = Router::new()
@@ -104,7 +105,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("Listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    // Connect info gives the login/signup limiter the peer address (#37).
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
 
     Ok(())
 }

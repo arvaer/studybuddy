@@ -8,6 +8,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use app::services::rate_limit::AuthLimits;
 use http::HeaderValue;
 use reqwest::Url;
 
@@ -40,6 +41,10 @@ pub struct Config {
     /// `LLM_ALLOWED_HOSTS` (default `api.anthropic.com,api.openai.com`);
     /// `LLM_TIMEOUT_SECS` defaults to 30.
     pub llm: Option<LlmSettings>,
+    /// `AUTH_RATE_LIMIT_PER_IP` (default 50), `AUTH_RATE_LIMIT_PER_EMAIL`
+    /// (default 5) attempts per `AUTH_RATE_LIMIT_WINDOW_SECS` (default 900)
+    /// on login and signup. Each must be at least 1.
+    pub auth_limits: AuthLimits,
 }
 
 const DEFAULT_LLM_ALLOWED_HOSTS: &str = "api.anthropic.com,api.openai.com";
@@ -76,6 +81,7 @@ impl fmt::Debug for Config {
             .field("log_filter", &self.log_filter)
             .field("cookie_secure", &self.cookie_secure)
             .field("llm", &self.llm)
+            .field("auth_limits", &self.auth_limits)
             .finish()
     }
 }
@@ -133,7 +139,34 @@ impl Config {
             Some(name) => Some(Self::llm_settings(&get, &name)?),
         };
 
-        Ok(Self { database_url, jwt_secret, port, cors_origin, uploads_dir, log_filter, cookie_secure, llm })
+        let auth_limits = Self::auth_limits(&get)?;
+
+        Ok(Self { database_url, jwt_secret, port, cors_origin, uploads_dir, log_filter, cookie_secure, llm, auth_limits })
+    }
+
+    fn auth_limits(get: &impl Fn(&str) -> Option<String>) -> Result<AuthLimits, ConfigError> {
+        let defaults = AuthLimits::default();
+        let positive = |name: &'static str, default: u64| -> Result<u64, ConfigError> {
+            match get(name) {
+                None => Ok(default),
+                Some(v) => v
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|n| *n >= 1)
+                    .ok_or(ConfigError::Invalid(name, "expected a whole number of at least 1")),
+            }
+        };
+        let per_ip = positive("AUTH_RATE_LIMIT_PER_IP", defaults.per_ip as u64)?;
+        let per_email = positive("AUTH_RATE_LIMIT_PER_EMAIL", defaults.per_email as u64)?;
+        let window = positive("AUTH_RATE_LIMIT_WINDOW_SECS", defaults.window.as_secs())?;
+        let clamp = |name: &'static str, n: u64| -> Result<u32, ConfigError> {
+            u32::try_from(n).map_err(|_| ConfigError::Invalid(name, "too large"))
+        };
+        Ok(AuthLimits {
+            per_ip:    clamp("AUTH_RATE_LIMIT_PER_IP", per_ip)?,
+            per_email: clamp("AUTH_RATE_LIMIT_PER_EMAIL", per_email)?,
+            window:    Duration::from_secs(window),
+        })
     }
 
     fn llm_settings(
@@ -214,6 +247,19 @@ mod tests {
         assert!(!off.cookie_secure);
         let err = Config::from_lookup(env(&[BASE[0], BASE[1], ("COOKIE_SECURE", "maybe")])).unwrap_err();
         assert!(matches!(err, ConfigError::Invalid("COOKIE_SECURE", _)));
+    }
+
+    #[test]
+    fn auth_limits_default_parse_and_reject_zero() {
+        let cfg = Config::from_lookup(env(BASE)).unwrap();
+        assert_eq!(cfg.auth_limits, AuthLimits::default());
+        let cfg = Config::from_lookup(env(&[
+            BASE[0], BASE[1],
+            ("AUTH_RATE_LIMIT_PER_IP", "7"), ("AUTH_RATE_LIMIT_PER_EMAIL", "3"), ("AUTH_RATE_LIMIT_WINDOW_SECS", "60"),
+        ])).unwrap();
+        assert_eq!(cfg.auth_limits, AuthLimits { per_ip: 7, per_email: 3, window: Duration::from_secs(60) });
+        let err = Config::from_lookup(env(&[BASE[0], BASE[1], ("AUTH_RATE_LIMIT_PER_EMAIL", "0")])).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid("AUTH_RATE_LIMIT_PER_EMAIL", _)));
     }
 
     #[test]

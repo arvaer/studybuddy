@@ -7,6 +7,7 @@ pub mod event;
 pub mod note;
 pub mod progress;
 pub mod question;
+pub mod rate_limit;
 pub mod reinforcement_unit;
 pub mod resource;
 pub mod settings;

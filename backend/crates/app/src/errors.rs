@@ -15,6 +15,9 @@ pub enum AppError {
     #[error("Validation: {0}")]
     Validation(String),
 
+    #[error("Too many attempts; retry after {retry_after_secs} seconds")]
+    TooManyRequests { retry_after_secs: u64 },
+
     #[error("Token error: {0}")]
     Token(String),
 
