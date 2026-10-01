@@ -13,6 +13,14 @@ Consequences for every ticket below:
 - **Frontend stays minimal on purpose.** The quiz page, an intent box, a hint control, a span beside the question. Nothing that does not show a Core capability or serve the owner's own study.
 - **Real sources, real study.** The first workspace is the owner's RL reading list; the gate 2 and gate 3 runs use those uploads, so every demo doubles as a study session.
 
+## What gates 2 and 3 must show (owner, 2026-10-01)
+
+The owner's reading of the demo: Core's case is **learning tracked over a long horizon**, which means stopping and starting, switching between several tasks, and keeping structure across all of it. Context management is the biggest unsolved part and the owner holds no opinion on how it should work, for lack of data. So:
+
+- **Gate 2 is stop and start.** One goal; the learner leaves mid-activity, the backend is killed and restarted, days pass by the clock, and the next wake continues the same plan with nothing lost and nothing published twice. The record, not a context window, is what carries the plan across the gap.
+- **Gate 3 is many threads, one structure.** Two or three goals in one workspace, interleaved by the learner, each with its own plan and progress, re-tests landing from the clock in the middle of other work, and a reader anyone can run that shows which goal each published activity served and why it was chosen. This is the Level 4 demo: planner, delegated children, timed returns, all in small blocks.
+- **Context management is instrumented, not decided.** Every operator wake records what it was handed (goal revision, open activities, recent attempts, hints, elapsed time) as a node beside its decision. Phase 2 and 3 then accumulate the data a policy needs; the policy itself is a Phase 3 ticket written after the owner has read the records. No summarisation, forgetting or retrieval scheme is chosen in this plan.
+
 ## What ships at the end of Phase 2
 
 A learner types one intent into an empty workspace and is answering a source-cited activity within one screen. Each accepted attempt wakes the operator, which publishes the next activity without being asked. A process kill at any point reopens with nothing lost and nothing published twice. The frontend is the existing quiz page plus an intent box and a hint control. No scheduling policy, mastery judgement, export, generated interface or code execution.
@@ -55,7 +63,7 @@ Each is one PR, small, with a reading-order guide. Sizes: S under 200 lines, M u
 | 20a | **Goal and start.** `POST /api/workspaces/{id}/goal` stores the intent as goal revision 1 and starts the run (`run_once` keyed by goal revision id). `GET /api/workspaces/{id}` returns goal, current activity id, operator state (`thinking`, `waiting`, `idle`). Frontend: the intent box on an empty workspace, nothing else. | M | Intent in, first activity out. |
 | 20b | **Answer wakes the operator.** On an accepted attempt against an operator-published revision, the route completes the `learner.wait` park by effect id from the attempt receipt; the owner runs on; the next `present` publishes. Frontend: the quiz page polls workspace state and shows the new activity. | M | The loop closes. |
 | 20c | **Hint.** `POST /api/attempts/drafts/{revisionId}/hint` asks the operator (a `learner.hint` effect served by the model provider), returns text, and the attempt that follows records it as assistance. Frontend: one control on the card, labelled. | S | Assistance exists and is recorded. |
-| 20d | **Gate 2.** `scripts/operator-demo.sh`: intent, first activity, answer, follow-up, kill the backend mid-think, restart, same follow-up, no duplicate. Doc like `gate-demo.md`. | S | Phase 2 is demonstrated, not claimed. |
+| 20d | **Gate 2.** `scripts/operator-demo.sh`: intent, first activity, answer, follow-up, kill the backend mid-think, restart, same follow-up, no duplicate; then leave mid-activity, advance the clock by days, return, same plan continues. Doc like `gate-demo.md`. | S | Phase 2 is demonstrated, not claimed. |
 
 Order: 18a → 18b → 18c → 19a → 19b → 19c → 20a → 20b → 20c → 20d. 19a can start after 18a since it needs only the receipt table.
 
@@ -68,6 +76,7 @@ Filed now so the Phase 2 work keeps their data in reach; built after 20d.
 | **Source spans** | A revision's `source_location` becomes `{page, start, end}` the quiz page renders beside the question from `/api/resources/{id}/pages`, so the learner reads the passage inside the activity. Pretests and gated passages are then just activities. |
 | **Source navigator** | At upload, derive a structure tree (headings with page ranges) from the page text and store it on the resource. A read-only `source.locate` effect walks the tree with the model and returns page ranges, the vectorless-RAG pattern; the operator cites them. Shaped as upstream's reader child once delegation is exercised. |
 | **Assessed explanations** | `assessments.method = model` for `explain` activities, produced by the operator after the attempt, never by the publication path; pending until then. |
+| **Wake context, recorded** | Each wake's handed-in context becomes a node the gate reader prints beside the operator's decision, so the context policy is chosen from records rather than opinion. The first consumer is gate 3. |
 | **Delayed re-tests** | Items answered with assistance or recently return unaided at preselected times via the clock-source park and timekeeper (T1, T2). |
 
 ## Not in this plan
