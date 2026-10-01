@@ -2,6 +2,17 @@
 
 October 1, 2026. Scopes the Phase 2 tickets (#18, #19, #20) and the first Phase 3 slices that the operator UX ruling and the guided-reading design call for. Decisions it rests on: [capsule-integration.md](capsule-integration.md), "Revisit after Phase 1" and "Learner UX for Phase 2"; the product in [operator-design.md](operator-design.md); the pedagogy in [learning-design.md](learning-design.md). Capsule pin `4b77dcc`; the working constraints of the hardening plan apply to every ticket.
 
+## Why this exists (owner, 2026-10-01)
+
+Two purposes, both real, no revenue. First, **StudyBuddy is the demonstration of Capsule Core**: that this kind of long-running, source-bound, recoverable agent work is built with relative ease from small capsule blocks. Second, **the owner is the first learner**, using it to become an RL expert for the Neural Routing thesis. The two keep each other honest: the demo is only convincing if the learning is real, and the learning only happens if the loop actually runs.
+
+Consequences for every ticket below:
+
+- **The capsule source is the product.** Each block (present, wait, hint, locate, critique, assess, plan) is a capsule or verb that fits on one screen and reads as what it does. Legibility of `backend/capsules/*.capsule` and the environment template outranks frontend polish.
+- **The gate demos are the deliverable.** `gate-demo.md` and its script are the pattern: a narrated run anyone can execute that shows a crash and a recovery, a refused scope, a replay that asks no provider. Gate 2 and gate 3 are written for a reader who wants to see what Core does, not a user who wants a nicer page.
+- **Frontend stays minimal on purpose.** The quiz page, an intent box, a hint control, a span beside the question. Nothing that does not show a Core capability or serve the owner's own study.
+- **Real sources, real study.** The first workspace is the owner's RL reading list; the gate 2 and gate 3 runs use those uploads, so every demo doubles as a study session.
+
 ## What ships at the end of Phase 2
 
 A learner types one intent into an empty workspace and is answering a source-cited activity within one screen. Each accepted attempt wakes the operator, which publishes the next activity without being asked. A process kill at any point reopens with nothing lost and nothing published twice. The frontend is the existing quiz page plus an intent box and a hint control. No scheduling policy, mastery judgement, export, generated interface or code execution.
