@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH\n            concept_stats AS (\n                SELECT\n                    COUNT(*) AS total_concepts,\n                    COUNT(*) FILTER (WHERE ru.state = 'stable') AS stable_concepts,\n                    COUNT(*) FILTER (WHERE ru.state IN ('unstable', 'introduced')) AS needs_reinforcement\n                FROM concepts c\n                LEFT JOIN reinforcement_units ru ON ru.concept_id = c.id\n                WHERE c.user_id = $1\n            ),\n            session_stats AS (\n                SELECT\n                    COUNT(*) FILTER (\n                        WHERE completed_at >= now() - interval '7 days'\n                    ) AS recent_sessions\n                FROM study_sessions\n                WHERE user_id = $1\n            )\n            SELECT\n                COALESCE(cs.total_concepts, 0)      AS \"total_concepts!: i64\",\n                COALESCE(cs.stable_concepts, 0)     AS \"stable_concepts!: i64\",\n                COALESCE(cs.needs_reinforcement, 0) AS \"needs_reinforcement!: i64\",\n                COALESCE(ss.recent_sessions, 0)     AS \"recent_sessions!: i64\"\n            FROM concept_stats cs\n            CROSS JOIN session_stats ss\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total_concepts!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "stable_concepts!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "needs_reinforcement!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "recent_sessions!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "4f7c52271310dcb41152d06a567ccc3ba44dd58003dc4b5744784c13e41b898f"
+}

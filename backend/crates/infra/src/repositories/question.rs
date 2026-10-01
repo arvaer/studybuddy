@@ -73,38 +73,6 @@ impl QuestionRepository for PgQuestionRepository {
         })
     }
 
-    async fn find_owned(&self, id: Uuid, user_id: Uuid) -> Result<Question, DomainError> {
-        let row = sqlx::query!(
-            r#"
-            SELECT q.id, q.ru_id, q.question_type::TEXT AS question_type,
-                   q.prompt, q.options, q.correct_answer, q.explanation, q.created_at
-            FROM questions q
-            JOIN reinforcement_units ru ON ru.id = q.ru_id
-            JOIN concepts c ON c.id = ru.concept_id
-            WHERE q.id = $1 AND c.user_id = $2
-            "#,
-            id,
-            user_id,
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| DomainError::Repository(e.to_string()))?
-        .ok_or_else(|| DomainError::NotFound(format!("question {id}")))?;
-
-        let options: Option<Vec<String>> = row.options.and_then(|v| serde_json::from_value(v).ok());
-
-        Ok(Question {
-            id:             row.id,
-            ru_id:          row.ru_id,
-            question_type:  QuestionType::try_from(row.question_type.as_deref().unwrap_or("recall"))?,
-            prompt:         row.prompt,
-            options,
-            correct_answer: row.correct_answer,
-            explanation:    row.explanation,
-            created_at:     row.created_at,
-        })
-    }
-
     async fn list(
         &self,
         ru_id: Option<Uuid>,

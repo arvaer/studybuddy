@@ -90,29 +90,6 @@ pub struct Question {
     pub created_at:     DateTime<Utc>,
 }
 
-// ─── QuizSession ─────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QuizSession {
-    pub id:              Uuid,
-    pub user_id:         Uuid,
-    pub config:          serde_json::Value,
-    pub score:           Option<i32>,
-    pub total_questions: Option<i32>,
-    pub started_at:      DateTime<Utc>,
-    pub completed_at:    Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QuizAnswer {
-    pub id:          Uuid,
-    pub session_id:  Uuid,
-    pub question_id: Uuid,
-    pub answer:      String,
-    pub is_correct:  bool,
-    pub answered_at: DateTime<Utc>,
-}
-
 // ─── StudySession ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -189,7 +166,6 @@ pub struct UserSettings {
     pub study_time_goal:       i32,
     pub daily_questions:       i32,
     pub daily_reminders:       bool,
-    pub streak_alerts:         bool,
     pub review_reminders:      bool,
     pub reduce_animations:     bool,
 }
@@ -202,6 +178,4 @@ pub struct LearnerProgress {
     pub stable_concepts:     i64,
     pub needs_reinforcement: i64,
     pub recent_sessions:     i64,
-    pub streak_days:         i64,
-    pub total_study_time:    i64, // minutes
 }

@@ -10,7 +10,6 @@ mod llm;
 mod notes;
 mod progress;
 mod questions;
-mod quiz_sessions;
 mod reinforcement_units;
 mod resources;
 mod settings;
@@ -35,7 +34,6 @@ pub fn router() -> Router<AppState> {
                 .merge(concepts::router())
                 .merge(reinforcement_units::router())
                 .merge(questions::router())
-                .merge(quiz_sessions::router())
                 .merge(study_sessions::router())
                 .merge(notes::router())
                 .merge(resources::router())

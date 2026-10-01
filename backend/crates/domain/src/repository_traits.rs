@@ -1,7 +1,7 @@
 use uuid::Uuid;
 
 use crate::entities::{
-    ClaimInContext, Concept, Event, LearnerProgress, Note, Question, QuizAnswer, QuizSession,
+    ClaimInContext, Concept, Event, LearnerProgress, Note, Question,
     ReinforcementUnit, Resource, StudySession, Topic, User, UserSettings,
 };
 use crate::errors::DomainError;
@@ -204,15 +204,6 @@ pub trait QuestionRepository: Send + Sync {
         explanation: &str,
     ) -> impl std::future::Future<Output = Result<Question, DomainError>> + Send;
 
-    /// Look up a question only if it belongs to `user_id` through its
-    /// reinforcement unit's concept. A foreign question is `NotFound`, the
-    /// same as a nonexistent one, so callers cannot tell them apart.
-    fn find_owned(
-        &self,
-        id: Uuid,
-        user_id: Uuid,
-    ) -> impl std::future::Future<Output = Result<Question, DomainError>> + Send;
-
     fn list(
         &self,
         ru_id: Option<Uuid>,
@@ -221,43 +212,6 @@ pub trait QuestionRepository: Send + Sync {
         topic_id: Option<Uuid>,
         user_id: Uuid,
     ) -> impl std::future::Future<Output = Result<Vec<Question>, DomainError>> + Send;
-}
-
-// ─── QuizSessionRepository ───────────────────────────────────────────────────
-
-pub trait QuizSessionRepository: Send + Sync {
-    fn create(
-        &self,
-        user_id: Uuid,
-        config: serde_json::Value,
-    ) -> impl std::future::Future<Output = Result<QuizSession, DomainError>> + Send;
-
-    fn find_by_id(
-        &self,
-        id: Uuid,
-        user_id: Uuid,
-    ) -> impl std::future::Future<Output = Result<QuizSession, DomainError>> + Send;
-
-    fn record_answer(
-        &self,
-        session_id: Uuid,
-        question_id: Uuid,
-        answer: &str,
-        is_correct: bool,
-    ) -> impl std::future::Future<Output = Result<QuizAnswer, DomainError>> + Send;
-
-    fn complete(
-        &self,
-        id: Uuid,
-        user_id: Uuid,
-        score: i32,
-        total: i32,
-    ) -> impl std::future::Future<Output = Result<QuizSession, DomainError>> + Send;
-
-    fn list_answers(
-        &self,
-        session_id: Uuid,
-    ) -> impl std::future::Future<Output = Result<Vec<QuizAnswer>, DomainError>> + Send;
 }
 
 // ─── StudySessionRepository ──────────────────────────────────────────────────

@@ -331,7 +331,6 @@ export interface Settings {
   studyTimeGoal: number;
   dailyQuestions: number;
   dailyReminders: boolean;
-  streakAlerts: boolean;
   reviewReminders: boolean;
   reduceAnimations: boolean;
 }

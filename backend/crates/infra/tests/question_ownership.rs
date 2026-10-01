@@ -1,14 +1,11 @@
-//! Regression tests for the first correctness slice of the hardening plan:
-//! `POST /api/questions/{id}/answer` must only act on questions the
-//! authenticated learner owns, and must not touch review state otherwise.
+//! `GET /api/questions` must only return questions the authenticated learner
+//! owns through RU → concept. The grade-and-mutate answer path was deleted in
+//! #15; answering is `POST /api/attempts` (see `record_attempt.rs`).
 //!
-//! Exercised through `QuestionService` with the real Postgres repositories,
+//! Exercised through `QuestionService` with the real Postgres repository,
 //! so the check cannot be bypassed at the service boundary.
 
-use app::dtos::question::AnswerRequest;
-use app::errors::AppError;
 use app::services::question::QuestionService;
-use domain::errors::DomainError;
 use domain::repository_traits::{
     ConceptRepository, QuestionRepository, ReinforcementUnitRepository, UserRepository,
 };
@@ -48,70 +45,39 @@ async fn seed(pool: &PgPool) -> Fixture {
     Fixture { owner, other, ru: ru.id, question: question.id }
 }
 
-fn service(pool: &PgPool) -> QuestionService<PgQuestionRepository, PgRuRepository> {
-    QuestionService::new(
-        PgQuestionRepository::new(pool.clone()),
-        PgRuRepository::new(pool.clone()),
-    )
-}
-
-fn answer(text: &str) -> AnswerRequest {
-    AnswerRequest { answer: text.to_string() }
-}
-
-async fn review_state(pool: &PgPool, owner: Uuid, ru: Uuid) -> (i32, String) {
-    let r = PgRuRepository::new(pool.clone()).find_by_id(ru, owner).await.unwrap();
-    (r.reinforcement_count, r.state.to_string())
+fn service(pool: &PgPool) -> QuestionService<PgQuestionRepository> {
+    QuestionService::new(PgQuestionRepository::new(pool.clone()))
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn owner_can_answer_and_review_state_advances(pool: PgPool) {
+async fn owner_lists_their_question(pool: PgPool) {
     let f = seed(&pool).await;
 
-    let res = service(&pool)
-        .submit_answer(f.owner, f.question, answer("P(A|B) = P(B|A)P(A)/P(B)"))
-        .await
-        .expect("owner answers");
-
-    assert!(res.is_correct);
-    assert_eq!(review_state(&pool, f.owner, f.ru).await.0, 1);
+    let listed = service(&pool).list(f.owner, None, None, None, None).await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, f.question.to_string());
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn other_learner_is_refused_and_review_state_is_untouched(pool: PgPool) {
+async fn other_learner_sees_nothing_even_through_linked_ids(pool: PgPool) {
     let f = seed(&pool).await;
-    let before = review_state(&pool, f.owner, f.ru).await;
+    let svc = service(&pool);
 
-    let res = service(&pool)
-        .submit_answer(f.other, f.question, answer("anything"))
-        .await;
-
-    assert!(
-        matches!(res, Err(AppError::Domain(DomainError::NotFound(_)))),
-        "expected NotFound, got {res:?}"
-    );
-    assert_eq!(review_state(&pool, f.owner, f.ru).await, before);
+    // Naming the owner's RU id does not widen the result past the predicate.
+    assert!(svc.list(f.other, Some(f.ru), None, None, None).await.unwrap().is_empty());
+    assert!(svc.list(f.other, None, None, None, None).await.unwrap().is_empty());
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn nonexistent_question_is_refused(pool: PgPool) {
+async fn no_answer_route_mutates_review_state(pool: PgPool) {
+    // The RU's review state is only reachable through RuService now; listing
+    // questions never touches it.
     let f = seed(&pool).await;
+    let before = PgRuRepository::new(pool.clone()).find_by_id(f.ru, f.owner).await.unwrap();
 
-    let res = service(&pool)
-        .submit_answer(f.owner, Uuid::new_v4(), answer("anything"))
-        .await;
+    let _ = service(&pool).list(f.owner, None, None, None, None).await.unwrap();
 
-    assert!(matches!(res, Err(AppError::Domain(DomainError::NotFound(_)))), "got {res:?}");
-}
-
-#[sqlx::test(migrations = "../../migrations")]
-async fn repository_lookup_is_scoped_by_owner(pool: PgPool) {
-    let f = seed(&pool).await;
-    let repo = PgQuestionRepository::new(pool.clone());
-
-    assert!(repo.find_owned(f.question, f.owner).await.is_ok());
-    assert!(matches!(
-        repo.find_owned(f.question, f.other).await,
-        Err(DomainError::NotFound(_))
-    ));
+    let after = PgRuRepository::new(pool.clone()).find_by_id(f.ru, f.owner).await.unwrap();
+    assert_eq!(after.reinforcement_count, before.reinforcement_count);
+    assert_eq!(after.state, before.state);
 }

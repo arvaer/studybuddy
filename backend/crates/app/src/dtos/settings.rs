@@ -12,7 +12,6 @@ pub struct UpdateSettingsRequest {
     pub study_time_goal:       Option<i32>,
     pub daily_questions:       Option<i32>,
     pub daily_reminders:       Option<bool>,
-    pub streak_alerts:         Option<bool>,
     pub review_reminders:      Option<bool>,
     pub reduce_animations:     Option<bool>,
 }
@@ -26,7 +25,6 @@ pub struct SettingsResponse {
     pub study_time_goal:       i32,
     pub daily_questions:       i32,
     pub daily_reminders:       bool,
-    pub streak_alerts:         bool,
     pub review_reminders:      bool,
     pub reduce_animations:     bool,
 }
@@ -40,7 +38,6 @@ impl From<UserSettings> for SettingsResponse {
             study_time_goal:       s.study_time_goal,
             daily_questions:       s.daily_questions,
             daily_reminders:       s.daily_reminders,
-            streak_alerts:         s.streak_alerts,
             review_reminders:      s.review_reminders,
             reduce_animations:     s.reduce_animations,
         }
@@ -57,7 +54,6 @@ impl UpdateSettingsRequest {
         if let Some(v) = self.study_time_goal       { s.study_time_goal = v; }
         if let Some(v) = self.daily_questions       { s.daily_questions = v; }
         if let Some(v) = self.daily_reminders       { s.daily_reminders = v; }
-        if let Some(v) = self.streak_alerts         { s.streak_alerts = v; }
         if let Some(v) = self.review_reminders      { s.review_reminders = v; }
         if let Some(v) = self.reduce_animations     { s.reduce_animations = v; }
         s

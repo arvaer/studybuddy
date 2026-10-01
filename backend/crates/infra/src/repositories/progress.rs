@@ -34,45 +34,17 @@ impl ProgressRepository for PgProgressRepository {
                 SELECT
                     COUNT(*) FILTER (
                         WHERE completed_at >= now() - interval '7 days'
-                    ) AS recent_sessions,
-                    COALESCE(SUM(
-                        EXTRACT(EPOCH FROM (
-                            COALESCE(completed_at, started_at) - started_at
-                        )) / 60.0
-                    ), 0)::BIGINT AS total_study_time
+                    ) AS recent_sessions
                 FROM study_sessions
                 WHERE user_id = $1
-            ),
-            streak AS (
-                -- Count consecutive days (most recent first) with at least one completed session
-                SELECT COUNT(*) AS streak_days
-                FROM (
-                    SELECT DISTINCT DATE(completed_at) AS study_date
-                    FROM study_sessions
-                    WHERE user_id = $1
-                      AND completed_at IS NOT NULL
-                      AND completed_at >= now() - interval '365 days'
-                ) dates
-                WHERE study_date >= (
-                    SELECT MAX(DATE(completed_at)) FROM study_sessions
-                    WHERE user_id = $1 AND completed_at IS NOT NULL
-                ) - (
-                    SELECT COUNT(DISTINCT DATE(completed_at)) - 1
-                    FROM study_sessions
-                    WHERE user_id = $1
-                      AND completed_at IS NOT NULL
-                ) * interval '1 day'
             )
             SELECT
                 COALESCE(cs.total_concepts, 0)      AS "total_concepts!: i64",
                 COALESCE(cs.stable_concepts, 0)     AS "stable_concepts!: i64",
                 COALESCE(cs.needs_reinforcement, 0) AS "needs_reinforcement!: i64",
-                COALESCE(ss.recent_sessions, 0)     AS "recent_sessions!: i64",
-                COALESCE(st.streak_days, 0)         AS "streak_days!: i64",
-                COALESCE(ss.total_study_time, 0)    AS "total_study_time!: i64"
+                COALESCE(ss.recent_sessions, 0)     AS "recent_sessions!: i64"
             FROM concept_stats cs
             CROSS JOIN session_stats ss
-            CROSS JOIN streak st
             "#,
             user_id,
         )
@@ -85,8 +57,6 @@ impl ProgressRepository for PgProgressRepository {
             stable_concepts:     row.stable_concepts,
             needs_reinforcement: row.needs_reinforcement,
             recent_sessions:     row.recent_sessions,
-            streak_days:         row.streak_days,
-            total_study_time:    row.total_study_time,
         })
     }
 }

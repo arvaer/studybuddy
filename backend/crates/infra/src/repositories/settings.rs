@@ -22,7 +22,7 @@ impl SettingsRepository for PgSettingsRepository {
             UserSettings,
             r#"
             SELECT user_id, reinforcement_prompts, question_frequency, ai_generated_notes,
-                   study_time_goal, daily_questions, daily_reminders, streak_alerts,
+                   study_time_goal, daily_questions, daily_reminders,
                    review_reminders, reduce_animations
             FROM user_settings WHERE user_id = $1
             "#,
@@ -40,10 +40,10 @@ impl SettingsRepository for PgSettingsRepository {
             r#"
             INSERT INTO user_settings (
                 user_id, reinforcement_prompts, question_frequency, ai_generated_notes,
-                study_time_goal, daily_questions, daily_reminders, streak_alerts,
+                study_time_goal, daily_questions, daily_reminders,
                 review_reminders, reduce_animations
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT (user_id) DO UPDATE SET
                 reinforcement_prompts = EXCLUDED.reinforcement_prompts,
                 question_frequency    = EXCLUDED.question_frequency,
@@ -51,12 +51,11 @@ impl SettingsRepository for PgSettingsRepository {
                 study_time_goal       = EXCLUDED.study_time_goal,
                 daily_questions       = EXCLUDED.daily_questions,
                 daily_reminders       = EXCLUDED.daily_reminders,
-                streak_alerts         = EXCLUDED.streak_alerts,
                 review_reminders      = EXCLUDED.review_reminders,
                 reduce_animations     = EXCLUDED.reduce_animations
             RETURNING
                 user_id, reinforcement_prompts, question_frequency, ai_generated_notes,
-                study_time_goal, daily_questions, daily_reminders, streak_alerts,
+                study_time_goal, daily_questions, daily_reminders,
                 review_reminders, reduce_animations
             "#,
             s.user_id,
@@ -66,7 +65,6 @@ impl SettingsRepository for PgSettingsRepository {
             s.study_time_goal,
             s.daily_questions,
             s.daily_reminders,
-            s.streak_alerts,
             s.review_reminders,
             s.reduce_animations,
         )
