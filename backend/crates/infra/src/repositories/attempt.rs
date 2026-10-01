@@ -62,7 +62,7 @@ impl PgAttemptRepository {
 async fn receipt(conn: &mut PgConnection, attempt_id: Uuid, user_id: Uuid) -> Result<AttemptReceipt, DomainError> {
     let row = sqlx::query!(
         r#"
-        SELECT a.id, a.activity_revision_id, a.submitted_at,
+        SELECT a.id, a.activity_revision_id, a.submitted_at, a.response,
                s.outcome::TEXT AS "outcome?", s.method::TEXT AS "method?",
                s.score AS "score?", s.feedback AS "feedback?"
         FROM attempts a
@@ -94,6 +94,7 @@ async fn receipt(conn: &mut PgConnection, attempt_id: Uuid, user_id: Uuid) -> Re
         attempt_id:           row.id,
         activity_revision_id: row.activity_revision_id,
         submitted_at:         row.submitted_at,
+        response:             row.response,
         assessment,
     })
 }
@@ -198,6 +199,7 @@ impl AttemptRepository for PgAttemptRepository {
                 attempt_id:           attempt.id,
                 activity_revision_id: revision.id,
                 submitted_at:         attempt.submitted_at,
+                response:             cmd.response,
                 assessment,
             },
             replayed: false,

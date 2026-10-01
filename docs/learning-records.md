@@ -70,3 +70,22 @@ The rule in step 2 lives only in the domain crate; the adapter calls it and must
 Tests: `backend/crates/infra/tests/learning_records_schema.rs` (schema), `authoring.rs` (create, revise, two learners, validation, eight concurrent revisions), `record_attempt.rs` (operation, including a forced failure after the attempt insert that proves rollback) and `idempotent_submission.rs` (replay, conflict, per-learner scope, key validation, twelve concurrent duplicates). The rule itself is unit-tested in `backend/crates/domain/src/learning.rs`.
 
 Not in this operation: the learner's review schedule is not updated. The old `POST /api/questions/{id}/answer` still mutates RU state directly; retiring it is part of the frontend cutover (#13) and deletion workstream.
+
+## Frontend (#13)
+
+The quiz page (`frontend/src/pages/Quiz.tsx`) walks the learner's activities and answers each through `POST /api/attempts`; it no longer grades, and no answer key reaches the browser. The pieces:
+
+- `frontend/src/lib/activities.ts` — the activities, revisions and attempts API as the backend sends it. `recordAttempt` reports `replayed` from the status code (200 replay, 201 new).
+- `frontend/src/lib/attempt-state.ts` — one attempt's client state, pure and tested without React. Phases are `restoring`, `draft`, `submitting`, `accepted` (backend state) and `failed` (with `retryable`). Per revision the browser keeps only the unsent draft, the request key with the exact payload it was minted for, and the attempt id once accepted, under `localStorage` key `studybuddy.attempt.<revisionId>`.
+- `frontend/src/hooks/use-attempt.ts` and `frontend/src/components/activity-card.tsx` — the hook and the card that renders exactly one phase.
+
+Rules the tests pin (`attempt-state.test.ts`, `activity-card.test.tsx`):
+
+- **Retry reuses the key.** A network failure or 5xx keeps the key and payload; the retry replays and the backend records once. A changed answer gets a new key, since a reused key with a different payload is a 409.
+- **A 4xx is not retryable.** The card shows the rejection and the draft stays editable.
+- **Pending is not wrong.** A receipt without an assessment renders as "recorded, awaiting assessment".
+- **Refresh restores backend state.** On mount, a stored attempt id is re-read with `GET /api/attempts/{id}`; the receipt now carries `response`, so what was answered is shown from the backend, not from a local copy. A 404 (a different learner on this browser, or a revision gone) drops the local record.
+- **Drafts survive a refresh** and are labelled as unsent.
+
+Gate step 4 (refresh the page and restart the backend; the accepted activity and attempt remain) is therefore: the activity list, the revision and the attempt receipt all come from the database on load, and the only local state is the draft and the index of what was recorded.
+

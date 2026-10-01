@@ -13,9 +13,12 @@ type Message = {
 interface QuizAiChatProps {
   questionPrompt: string;
   questionOptions?: string[];
-  correctAnswer: string;
-  explanation: string;
+  /// Withheld for backend-assessed activities (#13): the key never
+  /// reaches the client, so the chat only knows the accepted status.
+  correctAnswer?: string;
+  explanation?: string;
   userAnswer?: string;
+  /// Undefined while the attempt is pending assessment.
   wasCorrect?: boolean;
 }
 
@@ -49,7 +52,7 @@ export function QuizAiChat({
   }, [questionPrompt]);
 
   const contextSummary = userAnswer
-    ? `You answered "${userAnswer}" which was ${wasCorrect ? "correct" : "incorrect"}. The correct answer is "${correctAnswer}". ${explanation}`
+    ? `You answered "${userAnswer}"${wasCorrect === undefined ? "" : ` which was ${wasCorrect ? "correct" : "incorrect"}`}.${correctAnswer ? ` The correct answer is "${correctAnswer}".` : ""}${explanation ? ` ${explanation}` : ""}`
     : `The question is: "${questionPrompt}"`;
 
   const handleSend = () => {
@@ -83,9 +86,9 @@ export function QuizAiChat({
         {userAnswer && (
           <p className={cn(
             "text-xs mt-1 font-medium",
-            wasCorrect ? "text-stable" : "text-unstable"
+            wasCorrect === undefined ? "text-accent" : wasCorrect ? "text-stable" : "text-unstable"
           )}>
-            You answered {wasCorrect ? "correctly" : "incorrectly"}
+            {wasCorrect === undefined ? "Your answer is recorded and awaiting assessment" : `You answered ${wasCorrect ? "correctly" : "incorrectly"}`}
           </p>
         )}
       </div>

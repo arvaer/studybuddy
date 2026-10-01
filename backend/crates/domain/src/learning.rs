@@ -250,6 +250,9 @@ pub struct AttemptReceipt {
     pub attempt_id:           Uuid,
     pub activity_revision_id: Uuid,
     pub submitted_at:         DateTime<Utc>,
+    /// The answer exactly as submitted, so a client can show what was
+    /// answered after a refresh without keeping its own copy (#13).
+    pub response:             Value,
     pub assessment:           Option<Assessment>,
 }
 
@@ -405,7 +408,7 @@ mod tests {
 
     #[test]
     fn receipt_status_is_pending_without_assessment() {
-        let r = AttemptReceipt { attempt_id: Uuid::nil(), activity_revision_id: Uuid::nil(), submitted_at: Utc::now(), assessment: None };
+        let r = AttemptReceipt { attempt_id: Uuid::nil(), activity_revision_id: Uuid::nil(), submitted_at: Utc::now(), response: Value::Null, assessment: None };
         assert_eq!(r.status(), "pending");
     }
 }
