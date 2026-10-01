@@ -7,7 +7,6 @@ import {
   Target,
   Clock,
   Filter,
-  Settings2,
   MessageCircleQuestion,
   Loader2,
   AlertCircle,
@@ -29,7 +28,6 @@ import {
 import { fetchTopics, fetchConcepts } from "@/lib/api";
 import { fetchActivities, type Activity, type AttemptStatus } from "@/lib/activities";
 import { ActivityCard } from "@/components/activity-card";
-import { QuizConfigModal } from "@/components/quiz-config-modal";
 import { QuizAiChat } from "@/components/quiz-ai-chat";
 import {
   Sheet,
@@ -39,7 +37,6 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import type { Topic, Concept } from "@/types/study";
-import { QuizSessionConfig, defaultQuizConfig } from "@/types/study";
 
 // The quiz (#13): a walk through the learner's activities. Each card submits
 // through the backend and renders what it accepted; this page only decides
@@ -65,12 +62,6 @@ export default function QuizPage() {
   // never computed here.
   const [accepted, setAccepted] = useState<Record<string, AttemptStatus>>({});
   const [isComplete, setIsComplete] = useState(false);
-  const [showConfigModal, setShowConfigModal] = useState(true);
-  const [quizConfig, setQuizConfig] = useState<QuizSessionConfig>({
-    ...defaultQuizConfig,
-    topicId: initialTopicId === 'all' ? null : initialTopicId,
-    conceptId: initialConceptId === 'all' ? null : initialConceptId,
-  });
 
   useEffect(() => {
     let cancelled = false;
@@ -302,9 +293,6 @@ export default function QuizPage() {
           </div>
           <div className="flex items-center gap-4">
             {filters}
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowConfigModal(true)}>
-              <Settings2 className="h-4 w-4" />
-            </Button>
             <div className="text-right">
               <p className="text-sm font-medium text-foreground">{tally.correct}/{tally.answered}</p>
               <p className="text-xs text-muted-foreground">correct{tally.pending > 0 && `, ${tally.pending} pending`}</p>
@@ -381,15 +369,6 @@ export default function QuizPage() {
           </Button>
         </footer>
       </div>
-
-      <QuizConfigModal
-        open={showConfigModal}
-        onOpenChange={setShowConfigModal}
-        config={quizConfig}
-        onConfigChange={setQuizConfig}
-        onStartQuiz={() => { setShowConfigModal(false); setCurrentIndex(0); setIsComplete(false); }}
-        availableCards={filtered.length}
-      />
     </AppLayout>
   );
 }

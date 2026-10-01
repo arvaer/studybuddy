@@ -57,7 +57,7 @@ export function DraggableConceptCard({
     'empty': { icon: BookOpen, label: 'Not started', variant: 'default' as const },
     'needs-attention': { icon: AlertCircle, label: 'Needs review', variant: 'unstable' as const },
     'in-progress': { icon: Sparkles, label: 'Learning', variant: 'accent' as const },
-    'mastered': { icon: CheckCircle2, label: 'Mastered', variant: 'stable' as const },
+    'mastered': { icon: CheckCircle2, label: 'Stable', variant: 'stable' as const },
   };
   
   const config = statusConfig[status];
@@ -127,7 +127,7 @@ export function DraggableConceptCard({
               <span>{reinforcementUnits.length} concepts</span>
               <span>•</span>
               <span>
-                {reinforcementUnits.filter(ru => ru.state === 'stable').length} mastered
+                {reinforcementUnits.filter(ru => ru.state === 'stable').length} stable
               </span>
             </div>
           </div>

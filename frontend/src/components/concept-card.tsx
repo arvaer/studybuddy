@@ -51,7 +51,7 @@ export function ConceptCard({ name, description, reinforcementUnits, onClick }: 
     },
     'mastered': { 
       icon: CheckCircle2, 
-      label: 'Mastered', 
+      label: 'Stable', 
       variant: 'stable' as const,
       gradient: 'from-stable/8 to-transparent',
       iconBg: 'bg-stable/15',
@@ -136,7 +136,7 @@ export function ConceptCard({ name, description, reinforcementUnits, onClick }: 
                 {reinforcementUnits.length} concepts
               </span>
               <span className="text-xs text-muted-foreground">
-                {reinforcementUnits.filter(ru => ru.state === 'stable').length} mastered
+                {reinforcementUnits.filter(ru => ru.state === 'stable').length} stable
               </span>
             </div>
           </div>

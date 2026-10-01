@@ -46,7 +46,7 @@ export function TopicCard({ topic, concepts, defaultExpanded = false }: TopicCar
             {topic.name}
           </h3>
           <p className="text-sm text-muted-foreground truncate">
-            {concepts.length} concept{concepts.length !== 1 ? 's' : ''} · {progressPercent}% mastered
+            {concepts.length} concept{concepts.length !== 1 ? 's' : ''} · {progressPercent}% stable
           </p>
         </div>
         
