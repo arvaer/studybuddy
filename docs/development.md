@@ -91,6 +91,8 @@ scripts/test.sh
 
 ## 5. Full check
 
+[gate-demo.md](gate-demo.md) describes `scripts/gate-demo.sh`, the end-to-end walkthrough of the Phase 1 gate against a running backend.
+
 Run before opening a PR. All of these must pass, or the failure must be listed in [baseline findings](baseline-findings.md).
 
 ```sh
