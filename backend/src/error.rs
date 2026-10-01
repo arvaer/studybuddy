@@ -51,6 +51,15 @@ impl IntoResponse for HttpError {
             AppError::Validation(msg) => {
                 (StatusCode::UNPROCESSABLE_ENTITY, msg.clone())
             }
+            AppError::TooManyRequests { retry_after_secs } => {
+                let body = Json(json!({ "error": "too many attempts; try again later" }));
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    [(axum::http::header::RETRY_AFTER, retry_after_secs.to_string())],
+                    body,
+                )
+                    .into_response();
+            }
             AppError::Token(msg) => {
                 (StatusCode::UNAUTHORIZED, msg.clone())
             }

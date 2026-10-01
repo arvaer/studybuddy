@@ -23,6 +23,14 @@ Reviewed for issue #7 on 2026-09-30 by reading `backend/src/routes/auth.rs`, `ro
 
 Tests: `backend/crates/infra/tests/auth_session.rs` covers rotation, reuse of a rotated token, logout, expiry and validation.
 
+## Attempt limits (#37)
+
+`POST /api/auth/login` and `POST /api/auth/signup` count every attempt against two sliding windows before any password work: the peer address (`AUTH_RATE_LIMIT_PER_IP`, default 50 per window) and the case-folded email (`AUTH_RATE_LIMIT_PER_EMAIL`, default 5). The window is `AUTH_RATE_LIMIT_WINDOW_SECS` (default 900). An attempt over either limit is refused with 429 and a `Retry-After` header naming the seconds until the oldest attempt in that window ages out; the refused attempt is not counted. A successful login clears that email's window, so a learner who finally types the password right is not locked out by their own earlier tries; the address window is kept because one source may be working through many accounts.
+
+The limiter (`app::services::rate_limit::AuthLimiter`) is in-process memory. A restart forgets it, and several backend processes do not share it; a shared store is a deployment decision for later. The peer address comes from the TCP connection, so behind a reverse proxy every request shares the proxy's address and the per-address limit becomes a global one; trusting a forwarded header is deliberately not done until there is a proxy to trust. The dev server's `/api` proxy is such a case, which is why the per-address default is generous.
+
+Tests: trip and release by window expiry, per-address across emails, and success clearing only the email window are unit tests in `rate_limit.rs`; the configuration parsing is tested in `backend/src/config.rs`.
+
 ## Cookies
 
 Both cookies are `HttpOnly`, `SameSite=Lax`, `Secure` (unless `COOKIE_SECURE=false`), and carry a `Max-Age` equal to the token lifetime. The access cookie has path `/`; the refresh cookie has path `/api/auth`, so it is never sent with ordinary API requests. Logout removes each cookie with its own path, which is required for the browser to honour the removal.
@@ -39,8 +47,9 @@ Every API call goes through `sessionFetch` (`frontend/src/lib/session.ts`, #35).
 
 | Finding | Severity | Issue |
 | --- | --- | --- |
-| No rate limiting or lockout on login/signup | medium | #37 |
 | Expired refresh rows never purged; no reuse/family detection | low | #38 |
+
+Fixed in #37: no attempt limiting on login and signup.
 
 Fixed in #36: `Validate` was derived on every request DTO but invoked only for signup and login. `app::validation::validated` now runs first in every service entry point that takes a request DTO (topics, concepts, notes, resources, study sessions, auth); `backend/crates/infra/tests/request_validation.rs` proves each family trips as 422 and writes nothing.
 
