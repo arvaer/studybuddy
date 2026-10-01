@@ -4,6 +4,7 @@ use domain::repository_traits::NoteRepository;
 
 use crate::dtos::note::{CreateNoteRequest, NoteResponse, UpdateNoteRequest};
 use crate::errors::AppError;
+use crate::validation::validated;
 
 pub struct NoteService<R: NoteRepository> {
     repo: R,
@@ -29,6 +30,7 @@ impl<R: NoteRepository> NoteService<R> {
         user_id: Uuid,
         req: CreateNoteRequest,
     ) -> Result<NoteResponse, AppError> {
+        validated(&req)?;
         let concept_id = Uuid::parse_str(&req.concept_id)
             .map_err(|_| AppError::Validation("invalid concept_id".into()))?;
 
@@ -52,6 +54,7 @@ impl<R: NoteRepository> NoteService<R> {
         user_id: Uuid,
         req: UpdateNoteRequest,
     ) -> Result<NoteResponse, AppError> {
+        validated(&req)?;
         let note = self.repo.update(id, user_id, &req.content).await?;
         Ok(NoteResponse::from(note))
     }

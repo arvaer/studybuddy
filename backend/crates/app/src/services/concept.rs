@@ -4,6 +4,7 @@ use domain::repository_traits::ConceptRepository;
 
 use crate::dtos::concept::{ConceptResponse, CreateConceptRequest, UpdateConceptRequest};
 use crate::errors::AppError;
+use crate::validation::validated;
 
 pub struct ConceptService<R: ConceptRepository> {
     repo: R,
@@ -33,6 +34,7 @@ impl<R: ConceptRepository> ConceptService<R> {
         user_id: Uuid,
         req: CreateConceptRequest,
     ) -> Result<ConceptResponse, AppError> {
+        validated(&req)?;
         let topic_id = req
             .topic_id
             .as_deref()
@@ -66,6 +68,7 @@ impl<R: ConceptRepository> ConceptService<R> {
         user_id: Uuid,
         req: UpdateConceptRequest,
     ) -> Result<ConceptResponse, AppError> {
+        validated(&req)?;
         // Parse optional UUID fields
         let topic_id: Option<Option<Uuid>> = match req.topic_id {
             None => None,

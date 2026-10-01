@@ -6,6 +6,7 @@ use crate::dtos::study_session::{
     CreateStudySessionRequest, StudySessionResponse, UpdateProgressRequest,
 };
 use crate::errors::AppError;
+use crate::validation::validated;
 
 pub struct StudySessionService<R: StudySessionRepository> {
     repo: R,
@@ -39,6 +40,7 @@ impl<R: StudySessionRepository> StudySessionService<R> {
         user_id: Uuid,
         req: CreateStudySessionRequest,
     ) -> Result<StudySessionResponse, AppError> {
+        validated(&req)?;
         let concept_ids = req
             .concept_ids
             .iter()

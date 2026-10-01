@@ -39,9 +39,10 @@ Every API call goes through `sessionFetch` (`frontend/src/lib/session.ts`, #35).
 
 | Finding | Severity | Issue |
 | --- | --- | --- |
-| `Validate` derived on every DTO, invoked only for auth | medium | #36 |
 | No rate limiting or lockout on login/signup | medium | #37 |
 | Expired refresh rows never purged; no reuse/family detection | low | #38 |
+
+Fixed in #36: `Validate` was derived on every request DTO but invoked only for signup and login. `app::validation::validated` now runs first in every service entry point that takes a request DTO (topics, concepts, notes, resources, study sessions, auth); `backend/crates/infra/tests/request_validation.rs` proves each family trips as 422 and writes nothing.
 
 Fixed in #35: the frontend never refreshed, so every session ended 15 minutes after login.
 

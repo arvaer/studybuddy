@@ -1,12 +1,12 @@
 use chrono::{Duration, Utc};
 use jsonwebtoken::{EncodingKey, Header, encode};
 use uuid::Uuid;
-use validator::Validate;
 
 use domain::repository_traits::UserRepository;
 
 use crate::dtos::auth::{AuthResponse, LoginRequest, SignupRequest, TokenClaims, UserResponse};
 use crate::errors::AppError;
+use crate::validation::validated;
 
 /// Lifetime of an access token (a stateless JWT; cannot be revoked early).
 pub const ACCESS_TOKEN_TTL_SECS: i64 = 15 * 60;
@@ -31,7 +31,7 @@ impl<R: UserRepository> AuthService<R> {
     }
 
     pub async fn signup(&self, req: SignupRequest) -> Result<(AuthResponse, String), AppError> {
-        req.validate().map_err(validation_error)?;
+        validated(&req)?;
         let user = self
             .user_repo
             .create(&req.email, &req.password, &req.display_name)
@@ -55,7 +55,7 @@ impl<R: UserRepository> AuthService<R> {
     }
 
     pub async fn login(&self, req: LoginRequest) -> Result<(AuthResponse, String), AppError> {
-        req.validate().map_err(validation_error)?;
+        validated(&req)?;
         let user = self
             .user_repo
             .verify_password(&req.email, &req.password)
@@ -130,22 +130,6 @@ impl<R: UserRepository> AuthService<R> {
             s
         })
     }
-}
-
-/// Flatten validator output into one message. Field names only; never values.
-fn validation_error(errs: validator::ValidationErrors) -> AppError {
-    let mut parts: Vec<String> = errs
-        .field_errors()
-        .iter()
-        .flat_map(|(field, es)| {
-            es.iter().map(move |e| match &e.message {
-                Some(m) => m.to_string(),
-                None => format!("{field} is invalid"),
-            })
-        })
-        .collect();
-    parts.sort();
-    AppError::Validation(parts.join("; "))
 }
 
 fn sha256_hex(input: &str) -> String {
