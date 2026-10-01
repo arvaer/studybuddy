@@ -2,6 +2,8 @@
 
 Status: proposed architecture, September 25, 2026. No schema migrations, data deletion, or application changes performed.
 
+**Amended 2026-10-01 (#17):** the proposal below for a PostgreSQL adapter holding Capsule nodes and refs is withdrawn. The operator's record lives in `casd` through `capsule_host::HttpStorage`; PostgreSQL keeps application records and provider receipts keyed by effect id. See [capsule-integration.md](capsule-integration.md), "Revisit after Phase 1". Everything here about learning records, artifacts and transaction boundaries stands and was built in Phase 1.
+
 Product architecture: [personal operator contract](operator-design.md). Companions: [learning experience and research](learning-design.md) and [preparation/readiness](preparation-plan.md).
 
 ## Decision being proposed

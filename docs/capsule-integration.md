@@ -62,7 +62,7 @@ Each state-changing provider returns a versioned receipt keyed by `Effect::id()`
 
 [Core issue #284](https://github.com/Prominent-Systems/capsule-corp/issues/284): `resolve(Answer::Observe(Reply::Value(...)))` rejects object and fractional-number replies accepted by ordinary providers. Confirmed with a minimal example, including successful direct replay and null/list controls. The current v0 observation encoding goes through run operands; the issue requests a recovery/API ruling for this asymmetry.
 
-The probe uses `["publication.v1", effect_id, path, revision]` receipts so reconciliation works through today's API. This is a temporary boundary encoding, not a request to represent the database as lists. Do not silently stringify existing JSON receipts: the returned type and canonical bytes would change. Recheck this workaround when the upstream issue is resolved.
+The probe uses `["publication.v1", effect_id, path, revision]` receipts so reconciliation works through today's API. This is a temporary boundary encoding, not a request to represent the database as lists. Do not silently stringify existing JSON receipts: the returned type and canonical bytes would change. Recheck this workaround when the upstream issue is resolved. **Resolved 2026-09-30; see "Revisit after Phase 1" below.**
 
 ## First lesson and verified behavior
 
@@ -75,6 +75,50 @@ Three integration tests pass against the pinned public SDK:
 3. Publication reports unknown delivery after a simulated commit; reopen preserves the effect identity, and observing the existing receipt completes the run without repeating publication.
 
 The publication receipts in these tests are in memory. They do not prove SQL transaction behavior, multi-process ownership, receipt authorization, or recovery after a real process kill. Model outputs are scripted; carrying a learner explanation forward is not evidence of intelligent adaptation.
+
+## Revisit after Phase 1 (#17, 2026-10-01)
+
+Phase 1 closed on 2026-10-01 (gate record: [gate-demo.md](gate-demo.md)). This section re-checks the two upstream issues, picks the SDK revision and the adapter shape for Phase 2, and amends the earlier proposals above where Core moved under them. Checked against capsule-corp `main` at `9efc3fa9350753bd38313e5f7351448eed6499ec` (28 commits after the probe's pin) by reading `.active/CURRENT.md`, `.active/sdk-surface-v1.md`, `src/sdk.rs`, `src/session/door.rs` and `host/src/storage.rs`, and by compiling and running the probe against it.
+
+### Upstream status
+
+| Issue | Status on 2026-10-01 | What it means here |
+| --- | --- | --- |
+| [#284](https://github.com/Prominent-Systems/capsule-corp/issues/284) `Observe` rejects object and float replies | **Closed.** Fixed by PR #288 (merged 2026-09-30, `15aabf86`). Ruled in sdk "Parks and the one downward door": an observation is recorded as the reply it stands in for, so whatever a provider may reply a host may observe, and the run comes to the same value either way. | The tagged-list receipt workaround in the probe is no longer needed. Receipts can be the JSON objects the application already has. |
+| [#287](https://github.com/Prominent-Systems/capsule-corp/issues/287) async hosting and durable handoff | **Open, triaged** into `.active/CURRENT.md` Checkpoint 4E as four pieces. **H1** (the park is the whole request) and **H1b** (complete by effect id, idempotent) are done, merged in PR #291 on 2026-09-30. **H2** (a session owner for async hosts: one thread, a clonable `Send + Sync` handle, bounded channel, accepted-command identity) is PR #301, open, host code only. **H3** (async completion and cancellation) was folded into H1b and the clock/delegation parks. **H4** (SQLx `Storage` over `PgPool`) was **dropped**: the durable record is now `casd`, a separate repository, with `capsule_host::HttpStorage` as the port. | Requested capabilities 1 to 3 are met or landing in host code we can use. Capability 4 was answered with a different store than we asked for; see the storage decision below. |
+
+### SDK revision for Phase 2
+
+Pin capsule-corp **`9efc3fa9350753bd38313e5f7351448eed6499ec`** (`main`, 2026-10-01). It carries the Observe fix, H1/H1b, `HttpStorage`, the clock-source park (T1), wide delegation and sibling messages (D4a, D4b, D5). The probe's three tests compile and pass against it **with no source change** (the `Session`, `run_once`, `pending`, `resolve`, `Answer`, `Reply`, `Outcome` surface the probe uses is intact); bumping the probe's pin and lockfile is the first commit of #18. Bump again when PR #301 (H2) merges, since the session owner is the piece the Axum host will stand on; until it merges, the dedicated-thread rule in "Proposed host boundary" above stands.
+
+What the pinned SDK adds that the probe does not yet use, and that Phase 2 will:
+
+| Surface | Replaces | Use |
+| --- | --- | --- |
+| `Park::effect()`: the `Effect` as a provider would be given it (`id`, `capability`, `payload`), plus `run()`, `origin()`, `name()`, `uncertain()`, the same live and after reopen | Reading request operands off a private form, or keeping the only copy of a request in a provider closure | The host reads what it owes off `pending()` and keys receipts by `Effect::id()`. |
+| `Session::complete(&id, reply)` with `Completed::Recorded` / `Completed::Already`, `RunError::Completed` for a conflicting value, `NotPending`, `Abandoned` | `resolve(&park, Answer::Observe(..))` by digest, and the probe's list-shaped receipt | The answer endpoint and the recovery path both complete by effect id; a retry is `Already`, a conflicting completion is refused by name. |
+| `pending()` versus `paused()` versus `uncertain` | Guessing whether an effect happened | The host never retries a `paused` or `uncertain` effect; it looks up its receipt and completes. |
+| `clock/at` as a source family: a sleep is a park whose operand is the deadline | Any in-process timer | Spaced follow-ups later become wakes completed by a timekeeper (T2); not needed for the first loop. |
+
+### Adapter shape decisions
+
+1. **Record store: `casd` through `capsule_host::HttpStorage`, not a hand-written PostgreSQL `Storage`.** This amends [persistence-design.md](persistence-design.md), whose "PostgreSQL adapter for Capsule nodes and refs" is withdrawn. Upstream dropped H4 for the same reason we should: casd is the maintained, conformance-tested record (`host/tests/conformance.rs` runs one scenario set over `FileStorage` and `HttpStorage`: a record outliving its handle, ref compare-and-swap, a run cut mid-effect and resumed; two tenants keep their own session). Writing and proving the same thing over `PgPool` through a thread bridge is work that buys nothing the application needs. PostgreSQL keeps what it holds today: learners, activities, revisions, attempts, assessments, artifacts, and the new provider receipts keyed by effect id. casd holds the operator's record. The two never share a transaction, which is the crash boundary this document already names.
+   - *Deployment.* casd is one binary over RocksDB (`CASD_LISTEN`, `CASD_DATA_DIR`, `CASD_TENANCY`), run beside the backend like the dev database is; `scripts/dev-db.sh` gets a sibling. One keyspace per tenant is available; the first slice uses one tenant for the whole StudyBuddy deployment and scopes sessions by workspace in their names, since tenancy here is per deployment, not per learner.
+   - *Known costs, stated.* The casd repository is private and unpublished as a crate (upstream, 2026-09-30: "our port with a network in the middle until a second consumer appears"), so the backend builds it from source and the CI image needs access. `HttpStorage` uses a blocking HTTP client, which is fine on the owner thread and must never be called from a Tokio worker. If either cost proves wrong in #18, the fallback is `FileStorage` for a single-process deployment, not a Postgres `Storage`.
+
+2. **Session ownership: `capsule_host::Owner` and `Handle` (H2) once PR #301 merges.** The owner thread opens or reopens the session on `HttpStorage`, holds the non-`Send` providers, and runs the feed, pending, complete loop; Axum state holds a `Handle` clone; a command is accepted when it is in the bounded channel and runs whether or not the HTTP future is still waiting, which is exactly the "durable job identity, not a long wait" rule above. StudyBuddy writes no actor of its own. Until #301 merges, nothing in #18 depends on it: the storage slice and the receipt table come first.
+
+3. **Completion and recovery: by effect id, through `complete`.** Each state-changing provider (`learning/present`, later `learner/answer`) commits its domain row and a receipt row `(effect_id, session, kind, payload JSON)` in one PostgreSQL transaction, then returns the receipt JSON as its reply. After any crash, the owner reads `pending()`, looks each `Park::effect().id()` up in the receipt table, and calls `complete`; a missing receipt on an `uncertain` park is "the effect did not commit" and is re-performed only by an explicit policy, never automatically. The probe's `["publication.v1", ...]` encoding is retired with its pin bump.
+
+4. **Model access: the server-configured adapter from #6.** The `LlmClient` behind `/api/llm/proxy` is the only model transport; the capsule's model provider calls it from the owner thread through a runtime handle. No credentials, base URL or model name reach the capsule or the record.
+
+5. **Scope: a workspace is an environment, built from trusted ids.** Unchanged from above. The environment grants `learning/*` and `learner/*` scoped to `workspaces/<id>/*` where `<id>` comes from the authenticated request, never from the model.
+
+### Consequences for the Phase 2 tickets
+
+- **#18** becomes: pin bump; run casd beside the dev database; open and reopen a StudyBuddy session on `HttpStorage`; the receipt table and its migration; a kill test through the four crash points (before dispatch, during possible delivery, after the domain commit, after the reply is recorded) completing from receipts. No Postgres `Storage`.
+- **#19** is unchanged in intent: providers call the same `ActivityService` and `AttemptService` the routes do, so ownership, revision rules, transactions and receipts are shared and there is no second publication or grading path.
+- **#20** gains `complete` by effect id and loses the list receipt; the adapter is the one from #6.
 
 ## Implementation order after the hardening decision
 
