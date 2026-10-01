@@ -115,11 +115,23 @@ What the pinned SDK adds that the probe does not yet use, and that Phase 2 will:
 
 5. **Scope: a workspace is an environment, built from trusted ids.** Unchanged from above. The environment grants `learning/*` and `learner/*` scoped to `workspaces/<id>/*` where `<id>` comes from the authenticated request, never from the model.
 
+### Learner UX for Phase 2 (owner, 2026-10-01)
+
+**Intent first, then the operator goes hard.** The owner's ruling, in their words: "whatever is the least friction to get the learner … the learner needs to have an intent and then the operator just goes hard and makes it happen." So:
+
+- **One input.** A workspace with no goal contract asks one question on open, in one text box: what the learner wants to be able to do, and by when if there is a when. That text is the goal contract's first revision ([operator-design.md](operator-design.md), "The operator's charter"). There is no session-start button, no configuration, no choice of mode.
+- **The operator publishes immediately.** Submitting the intent starts the capsule run; its first `learning/present` publishes the first activity, and the quiz page the learner already knows shows it, pinned to a source excerpt they can open. The learner is answering within one screen of stating the goal.
+- **Follow-ups are the operator's.** An accepted attempt completes the learner's park; the operator reads the attempt and publishes the next activity without being asked. The learner's only verbs are answer, ask for a hint, and leave. Leaving costs nothing: the next activity is waiting on return, after any number of restarts.
+- **Assistance is one control.** A hint request on the activity card, served by the operator, recorded on the attempt as assistance and labelled as such. The chat sheet stays a mock until it has a real provider behind it.
+- **The intent is editable, not re-asked.** The learner can change the goal from the workspace; that is a new goal-contract revision the operator reads on its next turn. It is never asked again on open.
+
+What this rules out for Phase 2: an onboarding flow, a mode or deck picker, a "generate activities" button, and any step between stating the intent and answering the first activity. Inspecting why an activity was chosen, correcting learner memory and pinning a workspace revision are Phase 3 ([operator-design.md](operator-design.md), "Generated interfaces and reusable blocks").
+
 ### Consequences for the Phase 2 tickets
 
 - **#18** becomes: pin bump; the `capsule` schema migration (`nodes`, `refs`) and the receipt and lease tables; open and reopen a StudyBuddy session on `PgStorage::existing` against the disposable database from an owner thread; a kill test through the four crash points (before dispatch, during possible delivery, after the domain commit, after the reply is recorded) completing from receipts. No storage adapter of our own, and no casd in the default development setup.
 - **#19** is unchanged in intent: providers call the same `ActivityService` and `AttemptService` the routes do, so ownership, revision rules, transactions and receipts are shared and there is no second publication or grading path.
-- **#20** gains `complete` by effect id and loses the list receipt; the adapter is the one from #6.
+- **#20** gains `complete` by effect id and loses the list receipt; the adapter is the one from #6. Its frontend slice is the intent box, the hint control and nothing else ("Learner UX for Phase 2").
 
 ## Implementation order after the hardening decision
 
