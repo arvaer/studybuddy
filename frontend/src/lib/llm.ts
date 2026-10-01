@@ -1,3 +1,4 @@
+import { sessionFetch } from "./session";
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface LlmMessage {
@@ -46,7 +47,7 @@ async function llmRequest<T>(method: "GET" | "POST", path: string, body?: unknow
     headers: { "Content-Type": "application/json" },
   };
   if (body !== undefined) opts.body = JSON.stringify(body);
-  const res = await fetch(path, opts);
+  const res = await sessionFetch(path, opts);
   if (res.status === 503) throw new LlmNotConfiguredError();
   if (!res.ok) {
     const payload = await res.json().catch(() => null);

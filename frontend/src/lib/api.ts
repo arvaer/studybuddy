@@ -8,6 +8,7 @@ import type {
   Question,
   LearnerProgress,
 } from "@/types/study";
+import { sessionFetch } from "./session";
 
 // ─── Generic request helpers ────────────────────────────────────────────────
 
@@ -31,7 +32,7 @@ export async function requestWithStatus<T>(
   if (body !== undefined) {
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(path, opts);
+  const res = await sessionFetch(path, opts);
   if (!res.ok) {
     const payload = await res.json().catch(() => null);
     throw new ApiError(res.status, payload?.error ?? res.statusText);
@@ -378,7 +379,7 @@ export async function uploadResource(
   form.append("title", title);
   form.append("conceptIds", JSON.stringify(conceptIds));
 
-  const res = await fetch("/api/resources/upload", {
+  const res = await sessionFetch("/api/resources/upload", {
     method: "POST",
     credentials: "include",
     body: form,

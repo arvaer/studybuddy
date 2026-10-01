@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { apiGet, apiPost } from "@/lib/api";
+import { onSessionExpired } from "@/lib/session";
 
 export interface User {
   id: string;
@@ -40,13 +41,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Restore session from cookie on mount
+  // Restore session from cookie on mount. A 401 here is refreshed and retried
+  // by sessionFetch, so a learner returning within 7 days stays signed in.
   useEffect(() => {
     apiGet<UserDTO>("/api/auth/me")
       .then((dto) => setUser(toUser(dto)))
       .catch(() => setUser(null))
       .finally(() => setIsLoading(false));
   }, []);
+
+  // When a refresh fails the session is over: sign out cleanly (#35).
+  useEffect(() => onSessionExpired(() => setUser(null)), []);
 
   const login = useCallback(async (email: string, password: string) => {
     setIsLoading(true);
