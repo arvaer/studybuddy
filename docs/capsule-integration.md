@@ -62,7 +62,7 @@ Each state-changing provider returns a versioned receipt keyed by `Effect::id()`
 
 [Core issue #284](https://github.com/Prominent-Systems/capsule-corp/issues/284): `resolve(Answer::Observe(Reply::Value(...)))` rejects object and fractional-number replies accepted by ordinary providers. Confirmed with a minimal example, including successful direct replay and null/list controls. The current v0 observation encoding goes through run operands; the issue requests a recovery/API ruling for this asymmetry.
 
-The probe uses `["publication.v1", effect_id, path, revision]` receipts so reconciliation works through today's API. This is a temporary boundary encoding, not a request to represent the database as lists. Do not silently stringify existing JSON receipts: the returned type and canonical bytes would change. Recheck this workaround when the upstream issue is resolved.
+The probe uses `["publication.v1", effect_id, path, revision]` receipts so reconciliation works through today's API. This is a temporary boundary encoding, not a request to represent the database as lists. Do not silently stringify existing JSON receipts: the returned type and canonical bytes would change. Recheck this workaround when the upstream issue is resolved. **Resolved 2026-09-30; see "Revisit after Phase 1" below.**
 
 ## First lesson and verified behavior
 
@@ -75,6 +75,63 @@ Three integration tests pass against the pinned public SDK:
 3. Publication reports unknown delivery after a simulated commit; reopen preserves the effect identity, and observing the existing receipt completes the run without repeating publication.
 
 The publication receipts in these tests are in memory. They do not prove SQL transaction behavior, multi-process ownership, receipt authorization, or recovery after a real process kill. Model outputs are scripted; carrying a learner explanation forward is not evidence of intelligent adaptation.
+
+## Revisit after Phase 1 (#17, 2026-10-01)
+
+Phase 1 closed on 2026-10-01 (gate record: [gate-demo.md](gate-demo.md)). This section re-checks the two upstream issues, picks the SDK revision and the adapter shape for Phase 2, and amends the earlier proposals above where Core moved under them. Checked against capsule-corp `main` at `4b77dcce4de6efd8d81b0c671a33851ce353918a` (2026-10-01 20:04 UTC, after PR #302 merged; 41 commits after the probe's pin) by reading `.active/CURRENT.md`, `.active/sdk-surface-v1.md`, `src/sdk.rs`, `src/session/door.rs` and `host/src/storage.rs`, and by compiling and running the probe against it.
+
+### Upstream status
+
+| Issue | Status on 2026-10-01 | What it means here |
+| --- | --- | --- |
+| [#284](https://github.com/Prominent-Systems/capsule-corp/issues/284) `Observe` rejects object and float replies | **Closed.** Fixed by PR #288 (merged 2026-09-30, `15aabf86`). Ruled in sdk "Parks and the one downward door": an observation is recorded as the reply it stands in for, so whatever a provider may reply a host may observe, and the run comes to the same value either way. | The tagged-list receipt workaround in the probe is no longer needed. Receipts can be the JSON objects the application already has. |
+| [#287](https://github.com/Prominent-Systems/capsule-corp/issues/287) async hosting and durable handoff | **Open, triaged** into `.active/CURRENT.md` Checkpoint 4E as four pieces. **H1** (the park is the whole request) and **H1b** (complete by effect id, idempotent) are done, merged in PR #291 on 2026-09-30. **H2** (a session owner for async hosts: one thread, a clonable `Send + Sync` handle, bounded channel, accepted-command identity) merged in PR #301 on 2026-10-01, host code only, as `capsule_host::owner::{Owner, Handle, Ticket, Gone}`. **T2** (the timekeeper, a durable queue of wakes keyed by effect id, long-polled by the owner) merged in PR #300 the same day. **H3** (the park authorizes dispatch; completion is bound to the id) is **ruled** in PR #302 on 2026-10-01: the park is the one transition that authorizes a host to perform an effect outside the session, a paused effect is not, and cancellation is defined at each of the four crash points (before dispatch: deny; during possible delivery: `Unknown`, then complete from the receipt or `Allow` under the same id; after the domain commit: complete from the receipt; after the reply is recorded: `Already`). A late completion after revocation is `Abandoned` and the act stands outside the record. **H4** (SQLx `Storage` over `PgPool`) **shipped** in the same PR, taken back into the sprint because #287 was waiting on it: `capsule_host::postgres::PgStorage` behind the `postgres` feature, two tables (`nodes`, never updated; `refs`, moved by one conditional statement), each write its own committed transaction, conformance-tested with `CAPSULE_PG_URL`; the value owns a small Tokio runtime and blocks on it, so it is used from a plain thread such as the owner's, never inside a Tokio worker. Upstream runs casd itself and calls `PgStorage` "what a deployment that already has a Postgres writes". | All four requested capabilities are met on `main`. #287 stays open as the inbox. |
+
+### SDK revision for Phase 2
+
+Pin capsule-corp **`4b77dcce4de6efd8d81b0c671a33851ce353918a`** (`main`, 2026-10-01). It carries the Observe fix, H1/H1b, the H3 ruling, `HttpStorage` and `PgStorage`, the clock-source park (T1), the timekeeper (T2), the session owner (H2), wide delegation and sibling messages (D4a, D4b, D5). The probe's three tests compile and pass against it **with no source change** (the `Session`, `run_once`, `pending`, `resolve`, `Answer`, `Reply`, `Outcome` surface the probe uses is intact); bumping the probe's pin and lockfile is the first commit of #18. The session owner the Axum host stands on is in this pin, so the dedicated-thread rule in "Proposed host boundary" above is now implemented upstream rather than by us.
+
+What the pinned SDK adds that the probe does not yet use, and that Phase 2 will:
+
+| Surface | Replaces | Use |
+| --- | --- | --- |
+| `Park::effect()`: the `Effect` as a provider would be given it (`id`, `capability`, `payload`), plus `run()`, `origin()`, `name()`, `uncertain()`, the same live and after reopen | Reading request operands off a private form, or keeping the only copy of a request in a provider closure | The host reads what it owes off `pending()` and keys receipts by `Effect::id()`. |
+| `Session::complete(&id, reply)` with `Completed::Recorded` / `Completed::Already`, `RunError::Completed` for a conflicting value, `NotPending`, `Abandoned` | `resolve(&park, Answer::Observe(..))` by digest, and the probe's list-shaped receipt | The answer endpoint and the recovery path both complete by effect id; a retry is `Already`, a conflicting completion is refused by name. |
+| `pending()` versus `paused()` versus `uncertain` | Guessing whether an effect happened | The host never retries a `paused` or `uncertain` effect; it looks up its receipt and completes. |
+| `clock/at` as a source family: a sleep is a park whose operand is the deadline | Any in-process timer | Spaced follow-ups later become wakes completed by a timekeeper (T2); not needed for the first loop. |
+
+### Adapter shape decisions
+
+1. **Record store: PostgreSQL through `capsule_host::postgres::PgStorage`, with casd as the fallback.** This amends [persistence-design.md](persistence-design.md) in the other direction from what it proposed: the operator's nodes and refs do live in PostgreSQL, but in upstream's conformance-tested port, not in an adapter we write. StudyBuddy already runs one database, its migrations already own the schema, and the tests already run against the disposable container; a second service that must be built from a private repository is a cost with no benefit at one deployment. Two tables in a `capsule` schema, created by our migration and opened with `PgStorage::existing` so the application never lets a library create tables. PostgreSQL also keeps what it holds today: learners, activities, revisions, attempts, assessments, artifacts, and the new provider receipts keyed by effect id. The operator's record and the application's records are in one database but never in one transaction; the crash boundary this document names stays where it is, and the receipt table is how the two are reconciled.
+   - *Where it runs.* `PgStorage` owns its own small runtime and blocks on it, so it lives on the session owner's thread (H2) with a pool of its own; the application's `PgPool` on the Tokio runtime is untouched. It is never called from a handler.
+   - *Fallback.* casd through `capsule_host::HttpStorage` (verified locally on 2026-10-01: built from source, its suite and golden vectors pass, nodes and refs behave as documented, the record survives a restart) is what a deployment that wants the record outside its database, or several processes over one record, switches to. The two ports conform to the same suite, so the switch is one line in the owner's open closure and no change to providers or the loop. Writing a third store is not on the table.
+   - *Ownership.* Ref compare-and-swap fences the record, not an in-flight provider write; one owner per session is the application's rule, enforced in #18 by a per-workspace lease row in PostgreSQL that the owner thread holds.
+
+2. **Session ownership: `capsule_host::owner::Owner` and `Handle` (H2, merged).** `Owner::spawn` takes a closure that opens or reopens the session on the owning thread, installing providers and router there, so nothing a provider holds has to be `Send`. Axum state holds a `Handle` clone, which offers `run_once`, `complete`, `pending`, `paused`, `abandoned`, `runs`, `inspect` and a generic `submit`; each returns a `Ticket` whose `wait` is blocking, so an async handler calls it inside `spawn_blocking`. A command is accepted when it is in the bounded channel and runs whether or not the HTTP future is still waiting, which is exactly the "durable job identity, not a long wait" rule above; `Gone` distinguishes an owner stopped on purpose from one that died by panic, and the record decides a retry. `Handle::keep_time` runs the timekeeper loop for clock parks. StudyBuddy writes no actor of its own.
+
+3. **Completion and recovery: by effect id, through `complete`.** Each state-changing provider (`learning/present`, later `learner/answer`) commits its domain row and a receipt row `(effect_id, session, kind, payload JSON)` in one PostgreSQL transaction, then returns the receipt JSON as its reply. After any crash, the owner reads `pending()`, looks each `Park::effect().id()` up in the receipt table, and calls `complete`; a missing receipt on an `uncertain` park is "the effect did not commit" and is re-performed only by an explicit policy, never automatically. The probe's `["publication.v1", ...]` encoding is retired with its pin bump.
+
+4. **Model access: the server-configured adapter from #6.** The `LlmClient` behind `/api/llm/proxy` is the only model transport; the capsule's model provider calls it from the owner thread through a runtime handle. No credentials, base URL or model name reach the capsule or the record.
+
+5. **Scope: a workspace is an environment, built from trusted ids.** Unchanged from above. The environment grants `learning/*` and `learner/*` scoped to `workspaces/<id>/*` where `<id>` comes from the authenticated request, never from the model.
+
+### Learner UX for Phase 2 (owner, 2026-10-01)
+
+**Intent first, then the operator goes hard.** The owner's ruling, in their words: "whatever is the least friction to get the learner … the learner needs to have an intent and then the operator just goes hard and makes it happen." So:
+
+- **One input.** A workspace with no goal contract asks one question on open, in one text box: what the learner wants to be able to do, and by when if there is a when. That text is the goal contract's first revision ([operator-design.md](operator-design.md), "The operator's charter"). There is no session-start button, no configuration, no choice of mode.
+- **The operator publishes immediately.** Submitting the intent starts the capsule run; its first `learning/present` publishes the first activity, and the quiz page the learner already knows shows it, pinned to a source excerpt they can open. The learner is answering within one screen of stating the goal.
+- **Follow-ups are the operator's.** An accepted attempt completes the learner's park; the operator reads the attempt and publishes the next activity without being asked. The learner's only verbs are answer, ask for a hint, and leave. Leaving costs nothing: the next activity is waiting on return, after any number of restarts.
+- **Assistance is one control.** A hint request on the activity card, served by the operator, recorded on the attempt as assistance and labelled as such. The chat sheet stays a mock until it has a real provider behind it.
+- **The intent is editable, not re-asked.** The learner can change the goal from the workspace; that is a new goal-contract revision the operator reads on its next turn. It is never asked again on open.
+
+What this rules out for Phase 2: an onboarding flow, a mode or deck picker, a "generate activities" button, and any step between stating the intent and answering the first activity. Inspecting why an activity was chosen, correcting learner memory and pinning a workspace revision are Phase 3 ([operator-design.md](operator-design.md), "Generated interfaces and reusable blocks").
+
+### Consequences for the Phase 2 tickets
+
+- **#18** becomes: pin bump; the `capsule` schema migration (`nodes`, `refs`) and the receipt and lease tables; open and reopen a StudyBuddy session on `PgStorage::existing` against the disposable database from an owner thread; a kill test through the four crash points (before dispatch, during possible delivery, after the domain commit, after the reply is recorded) completing from receipts. No storage adapter of our own, and no casd in the default development setup.
+- **#19** is unchanged in intent: providers call the same `ActivityService` and `AttemptService` the routes do, so ownership, revision rules, transactions and receipts are shared and there is no second publication or grading path.
+- **#20** gains `complete` by effect id and loses the list receipt; the adapter is the one from #6. Its frontend slice is the intent box, the hint control and nothing else ("Learner UX for Phase 2").
 
 ## Implementation order after the hardening decision
 
