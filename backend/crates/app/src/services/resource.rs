@@ -4,6 +4,7 @@ use domain::repository_traits::ResourceRepository;
 
 use crate::dtos::resource::{CreateResourceRequest, ResourceResponse};
 use crate::errors::AppError;
+use crate::validation::validated;
 
 pub struct ResourceService<R: ResourceRepository> {
     repo: R,
@@ -30,6 +31,7 @@ impl<R: ResourceRepository> ResourceService<R> {
         user_id: Uuid,
         req: CreateResourceRequest,
     ) -> Result<ResourceResponse, AppError> {
+        validated(&req)?;
         let topic_id = Uuid::parse_str(&req.topic_id)
             .map_err(|_| AppError::Validation("invalid topic_id".into()))?;
 

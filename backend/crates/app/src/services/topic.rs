@@ -4,6 +4,7 @@ use domain::repository_traits::TopicRepository;
 
 use crate::dtos::topic::{CreateTopicRequest, TopicResponse, UpdateTopicRequest};
 use crate::errors::AppError;
+use crate::validation::validated;
 
 pub struct TopicService<R: TopicRepository> {
     repo: R,
@@ -29,6 +30,7 @@ impl<R: TopicRepository> TopicService<R> {
         user_id: Uuid,
         req: CreateTopicRequest,
     ) -> Result<TopicResponse, AppError> {
+        validated(&req)?;
         let topic = self
             .repo
             .create(
@@ -47,6 +49,7 @@ impl<R: TopicRepository> TopicService<R> {
         user_id: Uuid,
         req: UpdateTopicRequest,
     ) -> Result<TopicResponse, AppError> {
+        validated(&req)?;
         let topic = self
             .repo
             .update(
