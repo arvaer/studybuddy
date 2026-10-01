@@ -8,7 +8,6 @@ pub mod note;
 pub mod owned;
 pub mod progress;
 pub mod question;
-pub mod quiz_session;
 pub mod reinforcement_unit;
 pub mod resource;
 pub mod settings;

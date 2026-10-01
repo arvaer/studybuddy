@@ -99,4 +99,28 @@ No data or policy backs a due date, a mastery judgement or a study streak, so th
 - The sidebar no longer shows a hard-coded streak, and settings no longer offer streak alerts.
 - The quiz no longer opens a configuration modal. Its spaced-repetition settings, due counts and "include mastered cards" switch had no effect on which activities were served.
 
-Dead after this change, noted for the deletion ticket (#15): `frontend/src/components/quiz-config-modal.tsx`; the `QuizSessionConfig`, `SRSSettings`, `CramSettings`, `CardPriority` and `defaultQuizConfig` definitions in `frontend/src/types/study.ts`; `streakDays` and `totalStudyTime` on `LearnerProgress` and in the `/api/progress` query; `streakAlerts` on settings.
+Dead after this change and deleted in #15: `frontend/src/components/quiz-config-modal.tsx`; the `QuizSessionConfig`, `SRSSettings`, `CramSettings`, `CardPriority` and `defaultQuizConfig` definitions in `frontend/src/types/study.ts`; `streakDays` and `totalStudyTime` on `LearnerProgress` and in the `/api/progress` query; `streakAlerts` on settings.
+
+## What was deleted (#15)
+
+Deletion followed replacement. Every path below had a verified replacement consumer before it was removed, and no migration or row was touched: the `quiz_sessions`, `quiz_answers` and `questions` tables and the `user_settings.streak_alerts` column still exist, and a clean-database cutover is a separate decision.
+
+| Removed | Replaced by | Why it was safe |
+| --- | --- | --- |
+| `POST /api/questions/{id}/answer`, `QuestionService::submit_answer`, the inline SM-2 step (`advance_ru_state`), `AnswerRequest`/`AnswerResponse`, `QuestionRepository::find_owned` | `POST /api/attempts` (#8) records the answer; review-state changes go through `PATCH /api/reinforcement-units/{id}` | The quiz UI moved to attempts in #13. The ownership tests now cover `GET /api/questions`, which is the only remaining question route. |
+| `/api/quiz-sessions` (create, get, submit, complete), `QuizService`, `QuizSessionRepository`, `QuizSession`/`QuizAnswer` entities and DTOs | Attempts, activities and revisions | `submit` recorded `is_correct = false` for every answer and never graded. No frontend code called these routes. |
+| `streak_days`, `total_study_time` on `/api/progress` | nothing | Computed from `study_sessions`, which the quiz stopped writing in #13. The dashboard stopped showing them in #14. |
+| `streak_alerts` on `/api/settings` and the frontend `Settings` type | nothing | The switch was removed in #14; the column keeps its default and is no longer read or written. |
+| Frontend quiz config modal and its `QuizSessionConfig`, `SRSSettings`, `CramSettings`, `CardPriority`, `StudyMode`, `SessionLengthType` types and defaults | the activity list | Unwired in #14; nothing read its values. |
+| Cargo: `chrono`, `tower`, `thiserror` from the binary crate; `reqwest` from `app`; `serde`, `slug` from `infra`; `tower` and `slug` from the workspace. `app` and `tokio` are now dev-dependencies of `infra` | — | No source reference in the owning crate. `cargo build --workspace --all-targets` and the test suite confirm. No npm dependency became unused. |
+
+Overlapping content and scheduling fields that remain, with a decision each:
+
+| Field | Decision |
+| --- | --- |
+| `questions` table and `GET /api/questions` | **Keep for now.** The Learn page still lists questions per concept. Authoring (#41) is the replacement; retire when Learn reads activities. |
+| `reinforcement_units.stability_score`, `reinforcement_count`, `next_review` and `PATCH /api/reinforcement-units/{id}` | **Keep.** The only remaining review-state writer. A scheduling policy is Phase 2 work; until then the fields are stored facts the UI shows by name. |
+| `study_sessions` table, `/api/study-sessions`, `recent_sessions` on progress, the dashboard session list | **Drop later.** Nothing writes sessions since #13. Still read by the dashboard, so removal is a frontend change first, then the route and query. |
+| `quiz_sessions`, `quiz_answers` tables | **Drop later.** Unreferenced by code. Dropping is a migration and belongs to the clean-database decision. |
+| `user_settings.streak_alerts` column | **Drop later.** Unreferenced by code; same migration decision. |
+| `activities.concept_id`, `source_resource_id` alongside `reinforcement_units.concept_id` | **Keep.** Activities cite a concept and a source version; RUs track state for a concept. Different purposes, both owned. |

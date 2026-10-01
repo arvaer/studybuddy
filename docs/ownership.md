@@ -23,11 +23,11 @@ Status after #3 (questions), #4 (reinforcement units) and #29 (linked ids). "Own
 | `GET/POST /api/concepts`, `GET/PATCH/DELETE /api/concepts/{id}` | **yes, linked ids fixed in #29** | `topic_id`/`parent_id` verified owned on create and update via `repositories::owned`. |
 | `GET/POST /api/reinforcement-units`, `GET/PATCH /api/reinforcement-units/{id}` | **yes, fixed in #4** | Was entirely unscoped: list with no filter returned every learner's RUs; get and update took any ID; create accepted any concept. Now joined through `concepts.user_id`; create is `INSERT ... SELECT` from the owned concept. |
 | `GET /api/questions` | yes | join to `concepts.user_id` |
-| `POST /api/questions/{id}/answer` | **yes, fixed in #3** | `find_owned`; RU read/update now also scoped by #4 |
+| `POST /api/questions/{id}/answer` | deleted in #15 | Was fixed in #3 (`find_owned`). Answering is `POST /api/attempts`; the grade-and-mutate path and `find_owned` are gone. |
 | `GET/POST /api/notes`, `PATCH/DELETE /api/notes/{id}` | **yes, linked ids fixed in #29** | `concept_id`/`ru_id` verified owned on create. |
 | `GET/POST /api/resources`, `POST /api/resources/upload`, `DELETE /api/resources/{id}`, `GET /api/resources/{id}/{content,pages,file}` | **yes, linked ids fixed in #29** | `topic_id`/`concept_ids` verified owned on both create paths. File serving and same-name overwrite are #11/#12. |
 | `GET/POST /api/study-sessions`, `PATCH /api/study-sessions/{id}`, `POST .../complete` | **yes, linked ids fixed in #29** | `concept_ids` verified owned on create. |
-| `POST /api/quiz-sessions`, `GET /api/quiz-sessions/{id}`, `POST .../submit`, `POST .../complete` | yes for the session | `submit` stores any `question_id` and never grades. Retired by the persisted-attempt slice; noted on #8. `list_answers(session_id)` is only reached after an owned session lookup. |
+| `/api/quiz-sessions` (all four routes) | deleted in #15 | Never graded; replaced by attempts. Tables remain until the clean-database decision. |
 | `GET /api/progress` | yes | all CTEs filter on `user_id` |
 | `GET/PATCH /api/settings` | yes | keyed by `user_id` |
 | `GET /api/auth/me`, `POST /api/auth/{login,register,refresh,logout}` | n/a | identity itself; reviewed under #5/#6 |

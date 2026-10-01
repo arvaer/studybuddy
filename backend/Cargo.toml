@@ -20,11 +20,8 @@ tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
-chrono = { workspace = true }
 jsonwebtoken = { workspace = true }
 tower-http = { workspace = true }
-tower = { workspace = true }
-thiserror = { workspace = true }
 sqlx = { workspace = true }
 reqwest = { workspace = true }
 http = "1"
@@ -35,7 +32,6 @@ time = "0.3"
 axum = { version = "0.8", features = ["macros", "multipart"] }
 axum-extra = { version = "0.10", features = ["cookie", "cookie-signed"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
-tower = "0.5"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -64,9 +60,6 @@ validator = { version = "0.19", features = ["derive"] }
 
 # HTTP client (LLM proxy)
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-
-# Slug generation (knowledge base paths)
-slug = "0.1"
 
 # PDF text extraction
 pdf-extract = "0.10"

@@ -35,7 +35,6 @@ impl<R: SettingsRepository> SettingsService<R> {
                 study_time_goal:       60,
                 daily_questions:       20,
                 daily_reminders:       false,
-                streak_alerts:         true,
                 review_reminders:      true,
                 reduce_animations:     false,
             }

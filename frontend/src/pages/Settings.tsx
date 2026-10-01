@@ -34,7 +34,6 @@ const defaultSettings: Settings = {
   studyTimeGoal: 30,
   dailyQuestions: 10,
   dailyReminders: true,
-  streakAlerts: true,
   reviewReminders: false,
   reduceAnimations: false,
 };

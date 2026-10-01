@@ -1,23 +1,20 @@
 use uuid::Uuid;
 
-use domain::repository_traits::{QuestionRepository, ReinforcementUnitRepository};
+use domain::repository_traits::QuestionRepository;
 
-use crate::dtos::question::{AnswerRequest, AnswerResponse, QuestionResponse};
-use crate::dtos::reinforcement_unit::RuResponse;
+use crate::dtos::question::QuestionResponse;
 use crate::errors::AppError;
-use crate::services::reinforcement_unit::RuService;
 
-pub struct QuestionService<Q: QuestionRepository, R: ReinforcementUnitRepository> {
+/// Read-only access to a learner's questions. Answering moved to
+/// `POST /api/attempts` (persisted attempts, #8); the old grade-and-mutate
+/// path was deleted in #15.
+pub struct QuestionService<Q: QuestionRepository> {
     question_repo: Q,
-    ru_service:    RuService<R>,
 }
 
-impl<Q: QuestionRepository, R: ReinforcementUnitRepository> QuestionService<Q, R> {
-    pub fn new(question_repo: Q, ru_repo: R) -> Self {
-        Self {
-            question_repo,
-            ru_service: RuService::new(ru_repo),
-        }
+impl<Q: QuestionRepository> QuestionService<Q> {
+    pub fn new(question_repo: Q) -> Self {
+        Self { question_repo }
     }
 
     pub async fn list(
@@ -34,75 +31,4 @@ impl<Q: QuestionRepository, R: ReinforcementUnitRepository> QuestionService<Q, R
             .await?;
         Ok(questions.into_iter().map(QuestionResponse::from).collect())
     }
-
-    /// Submit an answer, evaluate correctness, and advance the RU state via SM-2.
-    ///
-    /// The question must belong to `user_id`; the ownership check happens in
-    /// the lookup, before any review state is read or mutated.
-    pub async fn submit_answer(
-        &self,
-        user_id: Uuid,
-        question_id: Uuid,
-        req: AnswerRequest,
-    ) -> Result<AnswerResponse, AppError> {
-        let question = self.question_repo.find_owned(question_id, user_id).await?;
-
-        let is_correct = question.correct_answer.trim().to_lowercase()
-            == req.answer.trim().to_lowercase();
-
-        let ru = self.ru_service.get(question.ru_id, user_id).await?;
-
-        // Build update request based on correctness
-        use crate::dtos::reinforcement_unit::UpdateRuRequest;
-        let (new_stability, new_state, new_count) = advance_ru_state(&ru, is_correct);
-
-        let updated_ru = self
-            .ru_service
-            .update_after_review(
-                question.ru_id,
-                user_id,
-                UpdateRuRequest {
-                    state:               Some(new_state),
-                    stability_score:     Some(new_stability),
-                    reinforcement_count: Some(new_count),
-                },
-            )
-            .await?;
-
-        Ok(AnswerResponse {
-            is_correct,
-            explanation: question.explanation,
-            updated_ru,
-        })
-    }
-}
-
-/// Determine new state, stability score, and reinforcement count after an answer.
-fn advance_ru_state(ru: &RuResponse, correct: bool) -> (f64, String, i32) {
-    let count   = ru.reinforcement_count + 1;
-    let current = ru.state.as_str();
-
-    if !correct {
-        let stability = (ru.stability_score - 0.15).max(0.0);
-        let state = if stability < 0.3 { "unstable" } else { current };
-        return (stability, state.to_string(), count);
-    }
-
-    // Correct answer — advance stability
-    let stability = (ru.stability_score + 0.12).min(1.0);
-
-    let state = match current {
-        "introduced"  => "reinforced",
-        "reinforced"  => {
-            if stability >= 0.6 { "stabilizing" } else { "reinforced" }
-        }
-        "unstable"    => "reinforced",
-        "stabilizing" => {
-            if stability >= 0.85 { "stable" } else { "stabilizing" }
-        }
-        "stable"      => "stable",
-        other         => other,
-    };
-
-    (stability, state.to_string(), count)
 }

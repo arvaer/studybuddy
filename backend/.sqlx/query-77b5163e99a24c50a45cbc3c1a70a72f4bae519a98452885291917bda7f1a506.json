@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT user_id, reinforcement_prompts, question_frequency, ai_generated_notes,\n                   study_time_goal, daily_questions, daily_reminders, streak_alerts,\n                   review_reminders, reduce_animations\n            FROM user_settings WHERE user_id = $1\n            ",
+  "query": "\n            SELECT user_id, reinforcement_prompts, question_frequency, ai_generated_notes,\n                   study_time_goal, daily_questions, daily_reminders,\n                   review_reminders, reduce_animations\n            FROM user_settings WHERE user_id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -40,16 +40,11 @@
       },
       {
         "ordinal": 7,
-        "name": "streak_alerts",
-        "type_info": "Bool"
-      },
-      {
-        "ordinal": 8,
         "name": "review_reminders",
         "type_info": "Bool"
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "reduce_animations",
         "type_info": "Bool"
       }
@@ -68,9 +63,8 @@
       false,
       false,
       false,
-      false,
       false
     ]
   },
-  "hash": "6f652210fc498f0453fcac3273f3168581d0aa06597c1844c9d01f700da761d6"
+  "hash": "77b5163e99a24c50a45cbc3c1a70a72f4bae519a98452885291917bda7f1a506"
 }

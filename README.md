@@ -92,8 +92,8 @@ RESTful API with JWT authentication:
 - `/api/topics` - Topic CRUD
 - `/api/concepts` - Concept management with hierarchical relationships
 - `/api/reinforcement-units` - RU state transitions and queries
-- `/api/questions` - Question generation and answer validation
-- `/api/quiz-sessions` - Quiz session lifecycle
+- `/api/questions` - Question listing (answering is `/api/attempts`)
+- `/api/activities`, `/api/attempts` - Authored activities, revisions and recorded attempts
 - `/api/resources` - Learning material uploads and metadata
 - `/api/notes` - User annotations and AI-generated notes
 

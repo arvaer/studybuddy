@@ -1,19 +1,6 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use domain::entities::Question;
-
-#[derive(Debug, Deserialize)]
-pub struct AnswerRequest {
-    pub answer: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AnswerResponse {
-    pub is_correct:  bool,
-    pub explanation: String,
-    pub updated_ru:  super::reinforcement_unit::RuResponse,
-}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

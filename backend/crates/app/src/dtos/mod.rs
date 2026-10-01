@@ -8,7 +8,6 @@ pub mod llm;
 pub mod note;
 pub mod progress;
 pub mod question;
-pub mod quiz;
 pub mod resource;
 pub mod settings;
 pub mod study_session;
