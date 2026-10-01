@@ -171,4 +171,18 @@ impl UserRepository for PgUserRepository {
         .map_err(|e| DomainError::Repository(e.to_string()))?;
         Ok(())
     }
+
+    async fn purge_expired_refresh_tokens(
+        &self,
+        user_id: Uuid,
+    ) -> Result<u64, DomainError> {
+        let done = sqlx::query!(
+            "DELETE FROM refresh_tokens WHERE user_id = $1 AND expires_at <= now()",
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DomainError::Repository(e.to_string()))?;
+        Ok(done.rows_affected())
+    }
 }
