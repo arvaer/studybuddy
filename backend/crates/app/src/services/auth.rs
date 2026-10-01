@@ -62,6 +62,10 @@ impl<R: UserRepository> AuthService<R> {
             .await
             .map_err(|_| AppError::Unauthorized("invalid credentials".into()))?;
 
+        // Housekeeping on the path that creates rows: expired tokens for this
+        // learner go now (#38). Nothing usable is touched.
+        self.user_repo.purge_expired_refresh_tokens(user.id).await?;
+
         let access_token = self.mint_access_token(user.id)?;
         let refresh_raw  = self.generate_refresh_token();
         let refresh_hash = sha256_hex(&refresh_raw);
@@ -91,8 +95,9 @@ impl<R: UserRepository> AuthService<R> {
         let hash    = sha256_hex(refresh_raw);
         let user_id = self.user_repo.validate_refresh_token(&hash).await?;
 
-        // Rotate: revoke old, issue new
+        // Rotate: revoke old, issue new; expired leftovers go with it (#38).
         self.user_repo.revoke_refresh_token(&hash).await?;
+        self.user_repo.purge_expired_refresh_tokens(user_id).await?;
 
         let access_token    = self.mint_access_token(user_id)?;
         let new_refresh_raw = self.generate_refresh_token();

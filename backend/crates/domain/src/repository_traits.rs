@@ -54,6 +54,14 @@ pub trait UserRepository: Send + Sync {
         &self,
         user_id: Uuid,
     ) -> impl std::future::Future<Output = Result<(), DomainError>> + Send;
+
+    /// Delete this user's refresh tokens that are past `expires_at` (#38).
+    /// Returns how many rows went. Expired rows are already unusable, so this
+    /// changes no behaviour; it keeps the table from growing with every login.
+    fn purge_expired_refresh_tokens(
+        &self,
+        user_id: Uuid,
+    ) -> impl std::future::Future<Output = Result<u64, DomainError>> + Send;
 }
 
 // ─── TopicRepository ─────────────────────────────────────────────────────────

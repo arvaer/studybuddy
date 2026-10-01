@@ -79,3 +79,54 @@ async fn login_wrong_password_is_unauthorized_and_issues_nothing(pool: PgPool) {
     let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM refresh_tokens").fetch_one(&pool).await.unwrap();
     assert_eq!(rows, 1, "only the signup token exists");
 }
+
+async fn expired(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM refresh_tokens WHERE expires_at <= now()")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// #38: expired rows are purged when the same learner logs in or refreshes;
+/// other learners' rows and live rows are untouched.
+#[sqlx::test(migrations = "../../migrations")]
+async fn expired_refresh_tokens_are_purged_on_login_and_refresh(pool: PgPool) {
+    let svc = service(&pool);
+    let (a, _) = svc.signup(signup_req("a@example.com", "correct horse")).await.unwrap();
+    let (_, b_refresh) = svc.signup(signup_req("b@example.com", "correct horse")).await.unwrap();
+    let a_id: uuid::Uuid = a.user.id.parse().unwrap();
+
+    // Three stale rows for A and one for B, dated as if from earlier logins.
+    for i in 0..3 {
+        sqlx::query("INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, now() - interval '1 day')")
+            .bind(a_id)
+            .bind(format!("stale-a-{i}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    sqlx::query("INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ((SELECT id FROM users WHERE email = 'b@example.com'), 'stale-b', now() - interval '1 day')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(expired(&pool).await, 4);
+
+    // A logs in: A's three stale rows go, B's stays, A's live signup row stays.
+    svc.login(LoginRequest { email: "a@example.com".into(), password: "correct horse".into() }).await.unwrap();
+    assert_eq!(expired(&pool).await, 1);
+    let a_live: i64 = sqlx::query_scalar("SELECT count(*) FROM refresh_tokens WHERE user_id = $1 AND expires_at > now()")
+        .bind(a_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(a_live, 2, "signup token and login token");
+
+    // B refreshes: B's stale row goes, and B still has exactly one live token.
+    svc.refresh(&b_refresh).await.unwrap();
+    assert_eq!(expired(&pool).await, 0);
+    let b_live: i64 = sqlx::query_scalar("SELECT count(*) FROM refresh_tokens WHERE user_id = (SELECT id FROM users WHERE email = 'b@example.com')")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(b_live, 1);
+}

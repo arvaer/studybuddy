@@ -31,6 +31,12 @@ The limiter (`app::services::rate_limit::AuthLimiter`) is in-process memory. A r
 
 Tests: trip and release by window expiry, per-address across emails, and success clearing only the email window are unit tests in `rate_limit.rs`; the configuration parsing is tested in `backend/src/config.rs`.
 
+## Refresh-token housekeeping and reuse detection (#38)
+
+**Purge.** Expired `refresh_tokens` rows are deleted for a learner whenever that learner logs in or refreshes (`UserRepository::purge_expired_refresh_tokens`, called from `AuthService::login` and `refresh`). An expired row is already unusable, so this changes no behaviour; it stops the table growing by one row per login forever. There is no periodic job: a learner who never returns leaves at most their last few rows, which is bounded and harmless. `auth_session.rs::expired_refresh_tokens_are_purged_on_login_and_refresh` proves the purge touches only that learner's expired rows.
+
+**Reuse detection: decided against for Phase 1.** Rotation deletes the presented token, so a second presentation of the same token is simply unknown and answers 401. Detecting it as a theft signal and revoking the learner's whole session family (`revoke_all_refresh_tokens` exists for that) needs rotated rows to be kept and marked rather than deleted, plus a family id per login, which is a schema change and a migration. The risk it addresses, a stolen refresh cookie used after the legitimate client has already rotated it, is bounded today by the 7-day lifetime, by rotation on every refresh, by the `HttpOnly`/`SameSite=Lax` cookie scoped to `/api/auth`, and by the attempt limits (#37). Revisit when Phase 2 introduces operator sessions that outlive a browser tab, since those are the sessions worth stealing; the shape of the change is a `family_id` column, a `revoked_at` instead of a delete on rotation, and `revoke_all_refresh_tokens` on a revoked-token presentation.
+
 ## Cookies
 
 Both cookies are `HttpOnly`, `SameSite=Lax`, `Secure` (unless `COOKIE_SECURE=false`), and carry a `Max-Age` equal to the token lifetime. The access cookie has path `/`; the refresh cookie has path `/api/auth`, so it is never sent with ordinary API requests. Logout removes each cookie with its own path, which is required for the browser to honour the removal.
@@ -47,7 +53,8 @@ Every API call goes through `sessionFetch` (`frontend/src/lib/session.ts`, #35).
 
 | Finding | Severity | Issue |
 | --- | --- | --- |
-| Expired refresh rows never purged; no reuse/family detection | low | #38 |
+
+Fixed in #38: expired refresh rows were never purged. Family-level reuse detection is deliberately deferred; the decision is above.
 
 Fixed in #37: no attempt limiting on login and signup.
 
