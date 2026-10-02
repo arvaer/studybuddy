@@ -1,0 +1,34 @@
+; Compatibility probe: fixture prompts and scripted model replies, no grading.
+(capsule learning-operator
+  (purpose "offer a learning activity and propose a follow-up")
+  (use capability call/model :kind model-call)
+  (use capability learning/present :kind tool :scope "workspaces/rl/*")
+  (use capability learner/answer :kind tool :scope "workspaces/rl/*")
+  (define coach/system
+    "Use the learner's explanation to propose a follow-up. Call tools every turn; finish last. Proposals are not assessments of mastery.")
+  (define coach/verbs
+    (quote ((coach/ask "Present an activity and wait for the learner.")
+            (coach/propose "Present a proposed follow-up for review.")
+            (coach/finish "Finish with a short summary."))))
+  (define coach/ask
+    (lambda (path prompt)
+      (list "answer" path (learner/answer path (learning/present path prompt)))))
+  (define coach/propose
+    (lambda (path prompt) (list "proposed" (learning/present path prompt))))
+  (define coach/finish (lambda (summary) (list "done" summary)))
+  (define coach/loop
+    (lambda (task turns)
+      (coach/turn task turns
+        (call/model (list "agent.v2" coach/system (list) task turns (offer coach/verbs))))))
+  (define coach/turn
+    (lambda (task turns reply)
+      (coach/next task turns reply (act reply coach/verbs))))
+  (define coach/next
+    (lambda (task turns reply results)
+      (if (eq? (car (car results)) "done")
+          (car results)
+          (if (eq? (car (car results)) "declined")
+              (car results)
+              (coach/loop task (cons (list reply results) turns))))))
+  (define coach/entry (lambda (task) (coach/loop task (list))))
+  (entry coach/entry))
