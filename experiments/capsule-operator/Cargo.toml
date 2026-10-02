@@ -1,0 +1,12 @@
+[package]
+name = "studybuddy-capsule-probe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Isolated from the application while the operator boundary is being reviewed.
+[workspace]
+
+[dev-dependencies]
+capsule-corp = { git = "https://github.com/Prominent-Systems/capsule-corp", rev = "4b77dcce4de6efd8d81b0c671a33851ce353918a" }
+serde_json = "1.0.150"
