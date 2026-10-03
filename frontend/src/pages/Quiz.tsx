@@ -27,6 +27,8 @@ import {
 } from "@/components/ui/select";
 import { fetchTopics, fetchConcepts } from "@/lib/api";
 import { fetchActivities, type Activity, type AttemptStatus } from "@/lib/activities";
+import { fetchCurrentWorkspace, fetchWorkspace, setGoal, operatorLine, shouldPoll, type Workspace } from "@/lib/workspace";
+import { IntentBox } from "@/components/intent-box";
 import { ActivityCard } from "@/components/activity-card";
 import { QuizAiChat } from "@/components/quiz-ai-chat";
 import {
@@ -62,17 +64,21 @@ export default function QuizPage() {
   // never computed here.
   const [accepted, setAccepted] = useState<Record<string, AttemptStatus>>({});
   const [isComplete, setIsComplete] = useState(false);
+  // The learner's workspace (20a): no goal means the intent box; a goal
+  // means the operator's state line, polled while it thinks.
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setLoadError(null);
-    Promise.all([fetchTopics(), fetchConcepts(), fetchActivities()])
-      .then(([t, c, a]) => {
+    Promise.all([fetchTopics(), fetchConcepts(), fetchActivities(), fetchCurrentWorkspace()])
+      .then(([t, c, a, w]) => {
         if (cancelled) return;
         setTopics(t);
         setAllConcepts(c);
         setActivities(a);
+        setWorkspace(w);
       })
       .catch((err: unknown) => {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : "failed to load");
@@ -82,6 +88,29 @@ export default function QuizPage() {
       });
     return () => { cancelled = true; };
   }, [reloads]);
+
+  // While the operator thinks, ask again every two seconds; when it stops,
+  // reload so the activity it published is on the page.
+  useEffect(() => {
+    if (!shouldPoll(workspace) || !workspace) return;
+    const id = workspace.id;
+    const timer = setTimeout(() => {
+      fetchWorkspace(id)
+        .then((w) => {
+          setWorkspace(w);
+          if (!shouldPoll(w)) setReloads((n) => n + 1);
+        })
+        .catch(() => { /* asked again on the next tick */ });
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [workspace]);
+
+  const startGoal = async (intent: string) => {
+    if (!workspace) return;
+    setWorkspace(await setGoal(workspace.id, intent));
+  };
+
+  const operatorStatus = workspace ? operatorLine(workspace) : null;
 
   const availableConcepts = useMemo(() => {
     if (selectedTopicId === 'all') return allConcepts;
@@ -195,6 +224,16 @@ export default function QuizPage() {
     );
   }
 
+  if (workspace && !workspace.goal) {
+    return (
+      <AppLayout>
+        <div className="flex-1 flex items-center justify-center p-8 min-h-full">
+          <IntentBox onSubmit={startGoal} />
+        </div>
+      </AppLayout>
+    );
+  }
+
   if (filtered.length === 0) {
     return (
       <AppLayout>
@@ -212,7 +251,14 @@ export default function QuizPage() {
           </header>
           <div className="flex-1 flex items-center justify-center p-8">
             <div className="text-center">
-              <p className="text-muted-foreground mb-4">No activities available for the selected filters.</p>
+              {operatorStatus ? (
+                <p className="text-muted-foreground mb-4 flex items-center gap-2 justify-center">
+                  {workspace?.operator === "thinking" && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {operatorStatus}
+                </p>
+              ) : (
+                <p className="text-muted-foreground mb-4">No activities available for the selected filters.</p>
+              )}
               <Button variant="outline" onClick={() => { setSelectedTopicId('all'); setSelectedConceptId('all'); }}>
                 Clear Filters
               </Button>
@@ -285,7 +331,15 @@ export default function QuizPage() {
               </Button>
             </Link>
             <div>
-              <h1 className="font-display font-semibold text-foreground">{getFilterLabel()}</h1>
+              <div>
+                <h1 className="font-display font-semibold text-foreground">{getFilterLabel()}</h1>
+                {operatorStatus && (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    {workspace?.operator === "thinking" && <Loader2 className="h-3 w-3 animate-spin" />}
+                    {operatorStatus}
+                  </p>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">
                 Activity {currentIndex + 1} of {filtered.length} · {current.kind} · revision {current.current.revision}
               </p>

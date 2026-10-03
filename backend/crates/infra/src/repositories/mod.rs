@@ -14,3 +14,4 @@ pub mod settings;
 pub mod study_session;
 pub mod topic;
 pub mod user;
+pub mod workspace;
