@@ -3,7 +3,9 @@
 //! records itself (providers in #19 do that through the application).
 
 pub mod host;
+pub mod model;
 pub mod receipts;
 
 pub use host::{OperatorError, OperatorHost, Reconciled, Settled};
+pub use model::Model;
 pub use receipts::{Receipt, Recorded};

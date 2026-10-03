@@ -95,6 +95,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("No OPERATOR_SECRET; /internal/effects answers 404");
     }
 
+    // The operator's model (19b): the in-process Claude adapter, keyed by
+    // ANTHROPIC_API_KEY as capsule-corp is. The key is never logged.
+    let operator_model = config.anthropic_api_key.map(|key| operator::Model::new(key, config.operator_model.clone()));
+    match &operator_model {
+        Some(model) => tracing::info!(model = model.name(), "Operator model configured (in-process Claude adapter)"),
+        None => tracing::info!("No ANTHROPIC_API_KEY; the operator cannot think"),
+    }
+
     let port = config.port;
     let state = AppState {
         pool,
@@ -104,6 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         llm,
         auth_limiter: std::sync::Arc::new(app::services::rate_limit::AuthLimiter::new(config.auth_limits)),
         operator_secret,
+        operator_model,
     };
 
     let app = Router::new()

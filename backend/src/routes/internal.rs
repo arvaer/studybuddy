@@ -256,6 +256,7 @@ mod tests {
             llm: None,
             auth_limiter: Arc::new(AuthLimiter::new(AuthLimits::default())),
             operator_secret: secret.map(Arc::from),
+            operator_model: None,
         };
         crate::routes::router().with_state(state)
     }

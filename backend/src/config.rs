@@ -50,6 +50,13 @@ pub struct Config {
     /// accept only this bearer secret (19a); unset, they answer 404. Never
     /// a learner's token, never logged.
     pub operator_secret: Option<String>,
+    /// `ANTHROPIC_API_KEY`, optional: the key capsule-corp reads, for the
+    /// operator's in-process Claude adapter (19b). Unset, the operator
+    /// cannot think. Never logged.
+    pub anthropic_api_key: Option<String>,
+    /// `OPERATOR_MODEL`, default `claude-opus-5-5`: the model the adapter
+    /// asks, the launcher's default too.
+    pub operator_model: String,
 }
 
 const DEFAULT_LLM_ALLOWED_HOSTS: &str = "api.anthropic.com,api.openai.com";
@@ -88,6 +95,8 @@ impl fmt::Debug for Config {
             .field("llm", &self.llm)
             .field("auth_limits", &self.auth_limits)
             .field("operator_secret", &self.operator_secret.as_ref().map(|_| "<redacted>"))
+            .field("anthropic_api_key", &self.anthropic_api_key.as_ref().map(|_| "<redacted>"))
+            .field("operator_model", &self.operator_model)
             .finish()
     }
 }
@@ -155,6 +164,11 @@ impl Config {
             Some(s) => Some(s),
         };
 
+        let anthropic_api_key = get("ANTHROPIC_API_KEY").filter(|k| !k.trim().is_empty());
+        let operator_model = get("OPERATOR_MODEL")
+            .map(|m| m.trim().to_string())
+            .unwrap_or_else(|| operator::model::DEFAULT_MODEL.to_string());
+
         Ok(Self {
             database_url,
             jwt_secret,
@@ -166,6 +180,8 @@ impl Config {
             llm,
             auth_limits,
             operator_secret,
+            anthropic_api_key,
+            operator_model,
         })
     }
 
@@ -415,5 +431,22 @@ mod tests {
         assert_eq!(cfg.port, 8081);
         assert_eq!(cfg.cors_origin, "https://app.example");
         assert_eq!(cfg.uploads_dir, PathBuf::from("/var/up"));
+    }
+
+    #[test]
+    fn operator_model_defaults_and_the_key_is_optional_and_redacted() {
+        let cfg = Config::from_lookup(env(BASE)).unwrap();
+        assert!(cfg.anthropic_api_key.is_none());
+        assert_eq!(cfg.operator_model, "claude-opus-5-5");
+        let cfg = Config::from_lookup(env(&[
+            BASE[0], BASE[1],
+            ("ANTHROPIC_API_KEY", "sk-ant-unit-test"), ("OPERATOR_MODEL", " claude-sonnet-5-5 "),
+        ])).unwrap();
+        assert_eq!(cfg.anthropic_api_key.as_deref(), Some("sk-ant-unit-test"));
+        assert_eq!(cfg.operator_model, "claude-sonnet-5-5");
+        let text = format!("{cfg:?}");
+        assert!(!text.contains("sk-ant-unit-test") && text.contains("claude-sonnet-5-5"), "{text}");
+        let cfg = Config::from_lookup(env(&[BASE[0], BASE[1], ("OPERATOR_MODEL", "  ")])).unwrap();
+        assert_eq!(cfg.operator_model, "claude-opus-5-5", "blank is unset");
     }
 }
