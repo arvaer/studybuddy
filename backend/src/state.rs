@@ -19,4 +19,7 @@ pub struct AppState {
     pub auth_limiter: Arc<AuthLimiter>,
     /// `None` when `OPERATOR_SECRET` is unset; `/internal/effects` answers 404.
     pub operator_secret: Option<Arc<str>>,
+    /// The operator's model (19b): upstream's Claude adapter, installed on
+    /// each session the owner opens. `None` without `ANTHROPIC_API_KEY`.
+    pub operator_model: Option<operator::Model>,
 }
