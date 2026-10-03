@@ -32,7 +32,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use app::dtos::activity::CreateActivityRequest;
+use app::dtos::activity::{CreateActivityRequest, RevisionContentRequest};
 use app::errors::AppError;
 use app::services::activity::ActivityService;
 use domain::errors::DomainError;
@@ -168,20 +168,48 @@ async fn effect(
     }
 }
 
-/// `[path, activity]`: the scope path the environment checked, then the
-/// activity exactly as the manual route receives it (`CreateActivityRequest`).
+/// `[path, kind, prompt, answer-key]`, as the learning capsule spells it
+/// (`backend/capsules/learning.capsule`, `coach/present`): the scope path
+/// the environment checked, a string or the segment list the kernel read it
+/// from; then the activity's kind, its prompt and the answer the model
+/// expects (`null` for none). Capsule source has lists and strings, not
+/// objects, so the request is built here, where the manual route's DTO is.
 fn parse_present(workspace: Uuid, payload: &[Value]) -> Result<CreateActivityRequest, Response> {
-    let [path, activity] = payload else {
-        return Err(refused(format!("{PRESENT_FAMILY} takes [path, activity]")));
+    let [path, kind, prompt, answer_key] = payload else {
+        return Err(refused(format!("{PRESENT_FAMILY} takes [path kind prompt answer-key]")));
     };
-    let Some(path) = path.as_str() else {
-        return Err(refused("path must be a string"));
+    let path = match path {
+        Value::String(path) => path.clone(),
+        Value::Array(segments) => segments
+            .iter()
+            .map(|s| s.as_str().map(str::to_string))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| refused("path segments must be strings"))?
+            .join("/"),
+        _ => return Err(refused("path must be a string or a list of segments")),
     };
     let scope = format!("workspaces/{workspace}/");
     if !path.starts_with(&scope) {
         return Err(refused(format!("path is outside {scope}*")));
     }
-    serde_json::from_value(activity.clone()).map_err(|e| refused(format!("activity: {e}")))
+    let Some(kind) = kind.as_str() else {
+        return Err(refused("kind must be a string"));
+    };
+    let Some(prompt) = prompt.as_str() else {
+        return Err(refused("prompt must be a string"));
+    };
+    Ok(CreateActivityRequest {
+        kind: kind.to_string(),
+        concept_id: None,
+        revision: RevisionContentRequest {
+            prompt: prompt.to_string(),
+            options: None,
+            answer_key: (!answer_key.is_null()).then(|| answer_key.clone()),
+            rubric: None,
+            source_resource_id: None,
+            source_location: None,
+        },
+    })
 }
 
 /// Everything after authorization, on one transaction: look up the receipt,
@@ -303,8 +331,16 @@ mod tests {
         json!({ "kind": "recall", "revision": { "prompt": prompt, "answerKey": "the discounted sum of future rewards" } })
     }
 
+    /// The effect as the capsule applies it: `[path kind prompt answer-key]`,
+    /// spelled from the same JSON the manual route takes.
     fn effect_body(id: &str, path: &str, activity: Value) -> Value {
-        json!({ "id": id, "capability": PRESENT_FAMILY, "payload": [path, activity] })
+        let payload = json!([
+            path,
+            activity["kind"],
+            activity["revision"]["prompt"],
+            activity["revision"].get("answerKey").cloned().unwrap_or(Value::Null)
+        ]);
+        json!({ "id": id, "capability": PRESENT_FAMILY, "payload": payload })
     }
 
     fn post(uri: &str, bearer: Option<&str>, body: &Value) -> Request<Body> {
@@ -514,36 +550,35 @@ mod tests {
         let app = app(pool.clone(), Some(SECRET));
         let path = format!("workspaces/{ws}/goal/1");
 
-        // Invalid content, and a concept another learner owns: both refused
-        // through the service's own checks, nothing written, no receipt, so
-        // a corrected program is free to perform under this id.
+        // Invalid content, and a kind the domain has no name for: both
+        // refused through the service's own checks, nothing written, no
+        // receipt, so a corrected program is free to perform under this id.
         let blank = effect_body("sha256:present-1", &path, activity("   "));
         let (status, reply) = send(&app, post(&effect_uri(ws), Some(SECRET), &blank)).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(reply["refused"], "prompt is required");
 
-        let foreign = effect_body(
+        let unknown_kind = effect_body(
             "sha256:present-1",
             &path,
-            json!({ "kind": "recall", "conceptId": Uuid::new_v4(), "revision": { "prompt": "P", "answerKey": "A" } }),
+            json!({ "kind": "lecture", "revision": { "prompt": "P", "answerKey": "A" } }),
         );
-        let (_, reply) = send(&app, post(&effect_uri(ws), Some(SECRET), &foreign)).await;
-        assert!(
-            reply["refused"].as_str().unwrap().contains("concept"),
-            "{reply}"
-        );
+        let (_, reply) = send(&app, post(&effect_uri(ws), Some(SECRET), &unknown_kind)).await;
+        assert!(reply["refused"].as_str().unwrap().contains("kind"), "{reply}");
+
+        // The path as the kernel hands it on, a segment list, is the same
+        // path; a list naming another workspace is outside the scope.
+        let listed = json!({ "id": "sha256:present-1", "capability": PRESENT_FAMILY,
+            "payload": [["workspaces", Uuid::new_v4().to_string(), "activities"], "recall", "P", "A"] });
+        let (_, reply) = send(&app, post(&effect_uri(ws), Some(SECRET), &listed)).await;
+        assert!(reply["refused"].as_str().unwrap().contains("outside"), "{reply}");
 
         assert_eq!(counts(&pool).await, (0, 0, 0));
-        let (status, _) = send(
-            &app,
-            post(
-                &effect_uri(ws),
-                Some(SECRET),
-                &effect_body("sha256:present-1", &path, activity("P")),
-            ),
-        )
-        .await;
+        let segments = json!({ "id": "sha256:present-1", "capability": PRESENT_FAMILY,
+            "payload": [["workspaces", ws.to_string(), "activities"], "recall", "P", "A"] });
+        let (status, reply) = send(&app, post(&effect_uri(ws), Some(SECRET), &segments)).await;
         assert_eq!(status, StatusCode::OK);
+        assert_eq!(reply["value"]["current"]["prompt"], "P", "{reply}");
         assert_eq!(counts(&pool).await, (1, 1, 1));
     }
 }

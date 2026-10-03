@@ -1,0 +1,10 @@
+; The environment one workspace's operator runs under (19c). `{{workspace}}`
+; is the workspace id, filled by the host; every domain effect is scoped to
+; that workspace's paths. The model is granted, the learner's wait is a park
+; nothing answers in-process (20b completes it from the attempt receipt).
+(environment studybuddy-learning
+  (grant capability call/model :kind model-call)
+  (grant capability learning/present :kind tool :scope "workspaces/{{workspace}}/*")
+  (grant capability learner/wait :kind tool :scope "workspaces/{{workspace}}/*")
+  (require constraint max-bytes :kind structural :rule (rule (max-bytes 16384)))
+  (budget :evaluator-steps 200000 :boundary-effects 300))

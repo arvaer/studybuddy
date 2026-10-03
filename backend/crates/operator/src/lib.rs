@@ -2,6 +2,7 @@
 //! `docs/phase-2-build.md`. This crate holds sessions; it writes no learning
 //! records itself (providers in #19 do that through the application).
 
+pub mod capsule;
 pub mod host;
 pub mod model;
 pub mod receipts;
