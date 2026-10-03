@@ -14,11 +14,18 @@
 //! into another learner's workspace even where the environment let the
 //! capsule name the path.
 //!
-//! One family today, `learning/present`, at `learning.present`. The reply
-//! and the receipt are the same JSON the manual route answers, produced by
-//! the same `ActivityService::create` on one transaction with the receipt:
-//! both land or neither does, and a replayed id answers the receipt and
-//! writes nothing. `learner/attempt` arrives with its caller in 20b.
+//! Two families. `learning/present`, at `learning.present`: the reply and
+//! the receipt are the same JSON the manual route answers, produced by the
+//! same `ActivityService::create` on one transaction with the receipt: both
+//! land or neither does, and a replayed id answers the receipt and writes
+//! nothing. `call/model`, at `call.model` (19b): the server's `LlmClient`
+//! over the `agent.v2` layout in `model_provider`; the reply is receipted
+//! once it exists, so a replayed id answers the same form without asking
+//! the model again. A failure before any text came back is `declined`
+//! (unreachable, an error status) or `refused` (the request itself); one
+//! after the call may have run is `unknown` (timeout, unreadable answer),
+//! which parks the effect for the host to settle (H3). `learner/attempt`
+//! arrives with its caller in 20b.
 
 use axum::{
     body::Bytes,
@@ -39,16 +46,43 @@ use domain::errors::DomainError;
 use infra::repositories::activity::PgActivityRepository;
 use operator::receipts::{self, Receipt, Recorded};
 
+use crate::llm::LlmError;
+use crate::model_provider;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new().route("/internal/effects/{workspace}/{family}", post(effect))
 }
 
-/// The family in the URL, where a slash cannot go, and as the capsule
-/// applies it, which is what the request's `capability` must say.
+/// The families served, each as the capsule applies it (what the request's
+/// `capability` must say) and as the URL spells it, where a slash cannot go.
 const PRESENT_PATH: &str = "learning.present";
 const PRESENT_FAMILY: &str = "learning/present";
+const MODEL_PATH: &str = "call.model";
+const MODEL_FAMILY: &str = "call/model";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Family {
+    Present,
+    Model,
+}
+
+impl Family {
+    fn at(path: &str) -> Option<Self> {
+        match path {
+            PRESENT_PATH => Some(Self::Present),
+            MODEL_PATH => Some(Self::Model),
+            _ => None,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Present => PRESENT_FAMILY,
+            Self::Model => MODEL_FAMILY,
+        }
+    }
+}
 
 /// The effect as the connector posts it.
 #[derive(Debug, Deserialize)]
@@ -67,6 +101,38 @@ fn value(v: Value) -> Response {
 /// perform under a fresh id.
 fn refused(why: impl Into<String>) -> Response {
     Json(json!({ "refused": why.into() })).into_response()
+}
+
+/// This call will not be performed and nothing was; the run may go on with
+/// `("declined" why)` as the call's value (V1-06d). No receipt.
+fn declined(why: impl Into<String>) -> Response {
+    Json(json!({ "declined": why.into() })).into_response()
+}
+
+/// The call may have run and its result is lost to us: the effect parks
+/// uncertain and the host settles it (H3). No receipt, since there is no
+/// observation to complete with.
+fn unknown(why: impl Into<String>) -> Response {
+    Json(json!({ "unknown": why.into() })).into_response()
+}
+
+/// The model client's failures in the protocol's words. Validation is the
+/// request's own fault; an unreachable provider or an error status sent
+/// nothing the model acted on; a timeout or an unreadable answer came
+/// after it may have.
+fn model_failure(e: LlmError) -> Response {
+    match e {
+        LlmError::NotConfigured => refused("no model provider is configured on this server"),
+        LlmError::Validation(why) => refused(why),
+        LlmError::Transport => declined("the model provider could not be reached"),
+        LlmError::Provider(status) => {
+            declined(format!("the model provider answered status {status}"))
+        }
+        LlmError::Timeout => unknown("the model provider timed out; the call may have run"),
+        LlmError::Malformed => {
+            unknown("the model provider answered unreadably; the call may have run")
+        }
+    }
 }
 
 /// A failure the endpoint cannot classify. The connector reads a 500 as
@@ -128,9 +194,9 @@ async fn effect(
         )
             .into_response();
     }
-    if family != PRESENT_PATH {
+    let Some(family) = Family::at(&family) else {
         return StatusCode::NOT_FOUND.into_response();
-    }
+    };
     let req: EffectRequest = match serde_json::from_slice(&body) {
         Ok(req) => req,
         Err(_) => {
@@ -141,9 +207,10 @@ async fn effect(
                 .into_response();
         }
     };
-    if req.capability != PRESENT_FAMILY {
+    if req.capability != family.name() {
         return refused(format!(
-            "{PRESENT_PATH} serves {PRESENT_FAMILY}, not {}",
+            "this endpoint serves {}, not {}",
+            family.name(),
             req.capability
         ));
     }
@@ -163,7 +230,11 @@ async fn effect(
         Err(e) => return database(e),
     };
 
-    match present(&state, workspace, owner, &req).await {
+    let served = match family {
+        Family::Present => present(&state, workspace, owner, &req).await,
+        Family::Model => model(&state, workspace, &req).await,
+    };
+    match served {
         Ok(reply) | Err(reply) => reply,
     }
 }
@@ -232,28 +303,87 @@ async fn present(
     }
 }
 
+/// `call/model`: the receipt if the call already ran, else the server's
+/// model over the `agent.v2` layout, receipted once its answer exists. The
+/// receipt is its own short transaction: there is no domain change to share
+/// one with, and the call itself cannot be inside one.
+async fn model(
+    state: &AppState,
+    workspace: Uuid,
+    req: &EffectRequest,
+) -> Result<Response, Response> {
+    if let Some(receipt) = receipts::find(&state.pool, workspace, &req.id)
+        .await
+        .map_err(database)?
+    {
+        return Ok(value(receipt.payload));
+    }
+
+    let [request] = req.payload.as_slice() else {
+        return Err(refused(format!(
+            "{MODEL_FAMILY} takes one {} request",
+            model_provider::KIND
+        )));
+    };
+    let messages = model_provider::messages(request).map_err(refused)?;
+    let client = state
+        .llm
+        .as_deref()
+        .ok_or_else(|| model_failure(LlmError::NotConfigured))?;
+    let text = client
+        .complete(&messages, None)
+        .await
+        .map_err(model_failure)?;
+
+    let receipt = Receipt {
+        effect_id: req.id.clone(),
+        workspace_id: workspace,
+        family: MODEL_FAMILY.to_string(),
+        payload: model_provider::reply(&text),
+    };
+    let mut tx = state.pool.begin().await.map_err(database)?;
+    match receipts::record(&mut tx, &receipt)
+        .await
+        .map_err(database)?
+    {
+        Recorded::New => {
+            tx.commit().await.map_err(database)?;
+            Ok(value(receipt.payload))
+        }
+        // Two calls under one id raced to the provider; the first answer
+        // recorded is the one the run observes, now and on replay.
+        Recorded::Existing(earlier) => Ok(value(earlier.payload)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm::{LlmClient, LlmProvider, LlmSettings};
     use app::dtos::auth::TokenClaims;
     use app::services::rate_limit::{AuthLimiter, AuthLimits};
     use axum::body::Body;
     use axum::http::Request;
     use http_body_util::BodyExt;
     use sqlx::PgPool;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
     use tower::ServiceExt;
 
     const SECRET: &str = "operator-secret-for-tests";
     const JWT: &str = "jwt-secret-for-tests";
 
     fn app(pool: PgPool, secret: Option<&str>) -> Router {
+        app_with_model(pool, secret, None)
+    }
+
+    fn app_with_model(pool: PgPool, secret: Option<&str>, llm: Option<LlmClient>) -> Router {
         let state = AppState {
             pool,
             jwt_secret: JWT.into(),
             uploads_dir: std::env::temp_dir(),
             cookie_secure: false,
-            llm: None,
+            llm: llm.map(Arc::new),
             auth_limiter: Arc::new(AuthLimiter::new(AuthLimits::default())),
             operator_secret: secret.map(Arc::from),
         };
@@ -544,5 +674,281 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(counts(&pool).await, (1, 1, 1));
+    }
+
+    // ---- call/model ----
+
+    /// A chat-completions provider that answers `form`, or fails as `mode`
+    /// says, and keeps every request body it saw.
+    struct Fake {
+        mode: &'static str,
+        form: &'static str,
+        seen: Mutex<Vec<Value>>,
+    }
+
+    async fn completions(
+        State(fake): State<Arc<Fake>>,
+        headers: HeaderMap,
+        Json(body): Json<Value>,
+    ) -> Response {
+        assert!(
+            headers.get("authorization").is_some(),
+            "the server's key was not sent"
+        );
+        fake.seen.lock().unwrap().push(body);
+        match fake.mode {
+            "ok" => Json(json!({ "choices": [{ "message": { "role": "assistant", "content": fake.form } }] }))
+                .into_response(),
+            "busy" => (StatusCode::TOO_MANY_REQUESTS, "slow down").into_response(),
+            "slow" => {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                StatusCode::OK.into_response()
+            }
+            other => unreachable!("{other}"),
+        }
+    }
+
+    async fn provider(mode: &'static str, form: &'static str) -> (LlmClient, Arc<Fake>) {
+        let fake = Arc::new(Fake {
+            mode,
+            form,
+            seen: Mutex::new(Vec::new()),
+        });
+        let app = Router::new()
+            .route("/v1/chat/completions", axum::routing::post(completions))
+            .with_state(Arc::clone(&fake));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = LlmClient::new(LlmSettings {
+            provider: LlmProvider::OpenAi,
+            model: "test-model".into(),
+            api_key: "server-side-key".into(),
+            base_url: reqwest::Url::parse(&format!("http://{addr}/")).unwrap(),
+            timeout: Duration::from_millis(300),
+        })
+        .unwrap();
+        (client, fake)
+    }
+
+    fn agent_request(task: &str) -> Value {
+        json!([
+            model_provider::KIND,
+            "Coach the learner.",
+            [],
+            task,
+            [[{ "form": "(coach/ask \"workspaces/w/a\" \"q?\")", "content": "…" }, [["answer", "workspaces/w/a", "42"]]]],
+            [["coach/ask", "Present an activity and wait.", ["path", "prompt"]], ["coach/finish", "Finish.", ["summary"]]]
+        ])
+    }
+
+    fn model_body(id: &str, request: Value) -> Value {
+        json!({ "id": id, "capability": MODEL_FAMILY, "payload": [request] })
+    }
+
+    fn model_uri(workspace: Uuid) -> String {
+        format!("/internal/effects/{workspace}/{MODEL_PATH}")
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn a_model_call_is_laid_out_answered_as_a_form_and_receipted(pool: PgPool) {
+        let ws = workspace(&pool, learner(&pool, "m@x.test").await).await;
+        let (client, fake) = provider("ok", "(coach/finish \"the learner has it\")").await;
+        let app = app_with_model(pool.clone(), Some(SECRET), Some(client));
+
+        let (status, reply) = send(
+            &app,
+            post(
+                &model_uri(ws),
+                Some(SECRET),
+                &model_body("sha256:m1", agent_request("Teach discounting")),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let expected = json!({
+            "value": { "form": "(coach/finish \"the learner has it\")", "content": "(coach/finish \"the learner has it\")" }
+        });
+        assert_eq!(reply, expected);
+
+        // The layout the provider saw: system with the verbs, the task, then
+        // the turn as what we said and what came of it.
+        let seen = fake.seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 1);
+        let messages = seen[0]["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[0]["role"], "system");
+        let system = messages[0]["content"].as_str().unwrap();
+        assert!(system.starts_with("Coach the learner."), "{system}");
+        assert!(
+            system.contains("(coach/ask path prompt) — Present an activity and wait."),
+            "{system}"
+        );
+        assert!(!system.contains("server-side-key"));
+        assert_eq!(
+            messages[1],
+            json!({ "role": "user", "content": "Teach discounting" })
+        );
+        assert_eq!(
+            messages[2],
+            json!({ "role": "assistant", "content": "(coach/ask \"workspaces/w/a\" \"q?\")" })
+        );
+        assert_eq!(
+            messages[3],
+            json!({ "role": "user", "content": "[\"answer\",\"workspaces/w/a\",\"42\"]" })
+        );
+
+        // Receipted under the family, with exactly the reply.
+        let (family, payload): (String, Value) = sqlx::query_as(
+            "SELECT family, payload FROM effect_receipts WHERE effect_id = 'sha256:m1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(family, MODEL_FAMILY);
+        assert_eq!(payload, expected["value"]);
+
+        // A replay answers the receipt and asks the model nothing, whatever
+        // the operands now say; a new id is a new call.
+        let (status, again) = send(
+            &app,
+            post(
+                &model_uri(ws),
+                Some(SECRET),
+                &model_body("sha256:m1", agent_request("Something else")),
+            ),
+        )
+        .await;
+        assert_eq!((status, again), (StatusCode::OK, expected));
+        assert_eq!(fake.seen.lock().unwrap().len(), 1);
+        let (status, _) = send(
+            &app,
+            post(
+                &model_uri(ws),
+                Some(SECRET),
+                &model_body("sha256:m2", agent_request("Something else")),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(fake.seen.lock().unwrap().len(), 2);
+        assert_eq!(counts(&pool).await, (0, 0, 2));
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn model_failures_speak_the_protocol_and_leave_no_receipt(pool: PgPool) {
+        let ws = workspace(&pool, learner(&pool, "f@x.test").await).await;
+        let uri = model_uri(ws);
+
+        // An error status: nothing the model acted on, so declined.
+        let (client, fake) = provider("busy", "").await;
+        let app = app_with_model(pool.clone(), Some(SECRET), Some(client));
+        let (status, reply) = send(
+            &app,
+            post(
+                &uri,
+                Some(SECRET),
+                &model_body("sha256:f1", agent_request("t")),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(reply["declined"], "the model provider answered status 429");
+        assert_eq!(fake.seen.lock().unwrap().len(), 1);
+
+        // A timeout: the call may have run, so unknown; the host settles it.
+        let (client, _) = provider("slow", "").await;
+        let app = app_with_model(pool.clone(), Some(SECRET), Some(client));
+        let (status, reply) = send(
+            &app,
+            post(
+                &uri,
+                Some(SECRET),
+                &model_body("sha256:f2", agent_request("t")),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            reply["unknown"].as_str().unwrap().contains("timed out"),
+            "{reply}"
+        );
+
+        // A model that wrote prose: a value with no form and the reason,
+        // which act hands the capsule as a refusal it can tell the model.
+        let (client, _) = provider("ok", "I would ask about discounting next.").await;
+        let app = app_with_model(pool.clone(), Some(SECRET), Some(client));
+        let (status, reply) = send(
+            &app,
+            post(
+                &uri,
+                Some(SECRET),
+                &model_body("sha256:f3", agent_request("t")),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(reply["value"].get("form").is_none(), "{reply}");
+        assert!(
+            reply["value"]["why"].as_str().unwrap().contains("no form"),
+            "{reply}"
+        );
+
+        // The request's own faults, and a server with no model: refused,
+        // before anything is sent.
+        let (client, fake) = provider("ok", "(coach/finish \"x\")").await;
+        let app = app_with_model(pool.clone(), Some(SECRET), Some(client));
+        let mut wrong_kind = agent_request("t");
+        wrong_kind[0] = json!("agent.v1");
+        let (_, reply) = send(
+            &app,
+            post(&uri, Some(SECRET), &model_body("sha256:f4", wrong_kind)),
+        )
+        .await;
+        assert!(
+            reply["refused"]
+                .as_str()
+                .unwrap()
+                .contains("serves agent.v2"),
+            "{reply}"
+        );
+        let two_operands = json!({ "id": "sha256:f5", "capability": MODEL_FAMILY, "payload": [agent_request("t"), "extra"] });
+        let (_, reply) = send(&app, post(&uri, Some(SECRET), &two_operands)).await;
+        assert!(
+            reply["refused"]
+                .as_str()
+                .unwrap()
+                .contains("takes one agent.v2 request"),
+            "{reply}"
+        );
+        let misnamed = json!({ "id": "sha256:f6", "capability": PRESENT_FAMILY, "payload": [agent_request("t")] });
+        let (_, reply) = send(&app, post(&uri, Some(SECRET), &misnamed)).await;
+        assert!(
+            reply["refused"]
+                .as_str()
+                .unwrap()
+                .contains("serves call/model"),
+            "{reply}"
+        );
+        assert_eq!(fake.seen.lock().unwrap().len(), 0);
+
+        let app = app_with_model(pool.clone(), Some(SECRET), None);
+        let (status, reply) = send(
+            &app,
+            post(
+                &uri,
+                Some(SECRET),
+                &model_body("sha256:f7", agent_request("t")),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            reply["refused"],
+            "no model provider is configured on this server"
+        );
+
+        // The prose reply was a value, so it was receipted; nothing else was.
+        assert_eq!(counts(&pool).await, (0, 0, 1));
     }
 }

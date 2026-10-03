@@ -1,6 +1,7 @@
 mod config;
 mod error;
 mod llm;
+mod model_provider;
 mod routes;
 mod state;
 
