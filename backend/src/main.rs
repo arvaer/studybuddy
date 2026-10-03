@@ -103,6 +103,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => tracing::info!("No ANTHROPIC_API_KEY; the operator cannot think"),
     }
 
+    // The program the operator runs (19c): compiled here so a broken capsule
+    // fails the process, and its definition address logged, which pins what
+    // source this process runs.
+    let (capsule_name, capsule_address) = operator::capsule::check()?;
+    tracing::info!(capsule = %capsule_name, definition = %capsule_address, "Learning capsule compiled");
+
     let port = config.port;
     let state = AppState {
         pool,

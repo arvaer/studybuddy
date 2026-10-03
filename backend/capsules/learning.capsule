@@ -1,0 +1,51 @@
+; The learning operator, v1 (19c; docs/phase-2-build.md). One goal; one
+; activity in front of the learner at a time; the model proposes each next
+; one from the attempt before it, and finishes when it reads the goal as met.
+;
+; `{{workspace}}` is filled by the host (operator::capsule) before compiling,
+; so the path every effect names is the host's, never the model's: the model
+; picks prompts; where they go is fixed here and granted by the environment.
+(capsule learning-operator
+  (purpose "keep one activity in front of the learner until the goal is met")
+  (use capability call/model :kind model-call)
+  (use capability learning/present :kind tool :scope "workspaces/{{workspace}}/*")
+  (use capability learner/wait :kind tool :scope "workspaces/{{workspace}}/*")
+
+  (define coach/path (quote ("workspaces" "{{workspace}}" "activities")))
+
+  (define coach/system
+    "You coach one learner toward the goal they stated. Each turn, call exactly one verb. Present one short activity at a time: a prompt the learner answers in a sentence or two, with the answer you expect. Read each attempt before choosing the next prompt; go deeper where the attempt was weak. When the attempts show the goal is met, finish with a short summary for the learner. Your proposals are not assessments of mastery.")
+
+  (define coach/verbs
+    (quote ((coach/present "Publish one activity to the learner and wait for their attempt. Answers (\"attempt\" the-attempt).")
+            (coach/finish "End the session with a short summary for the learner."))))
+
+  ;; Present, then wait for the attempt. Both name coach/path first, which
+  ;; the environment's grant covers and nothing else.
+  (define coach/present
+    (lambda (prompt answer-key)
+      (list "attempt"
+            (learner/wait coach/path
+              (learning/present coach/path "recall" prompt answer-key)))))
+
+  (define coach/finish (lambda (summary) (list "done" summary)))
+
+  ;; The loop: ask the model, run what it picked, go again with the turn on
+  ;; the record, until it finishes or the model declines.
+  (define coach/loop
+    (lambda (goal turns)
+      (coach/turn goal turns
+        (call/model (list "agent.v2" coach/system (list) goal turns (offer coach/verbs))))))
+  (define coach/turn
+    (lambda (goal turns reply)
+      (coach/next goal turns reply (act reply coach/verbs))))
+  (define coach/next
+    (lambda (goal turns reply results)
+      (if (eq? (car (car results)) "done")
+          (car results)
+          (if (eq? (car (car results)) "declined")
+              (car results)
+              (coach/loop goal (cons (list reply results) turns))))))
+
+  (define coach/entry (lambda (goal) (coach/loop goal (list))))
+  (entry coach/entry))
