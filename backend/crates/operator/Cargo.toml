@@ -1,0 +1,15 @@
+[package]
+name = "operator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+capsule-corp = { workspace = true }
+capsule-host = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
