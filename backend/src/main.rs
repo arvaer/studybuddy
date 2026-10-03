@@ -86,6 +86,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    // The operator's effect endpoints (19a): served only with a secret,
+    // which the embedded owner's providers present over loopback.
+    let operator_secret = config.operator_secret.map(std::sync::Arc::from);
+    if operator_secret.is_some() {
+        tracing::info!("Operator effect endpoints served at /internal/effects");
+    } else {
+        tracing::info!("No OPERATOR_SECRET; /internal/effects answers 404");
+    }
+
     let port = config.port;
     let state = AppState {
         pool,
@@ -94,6 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cookie_secure: config.cookie_secure,
         llm,
         auth_limiter: std::sync::Arc::new(app::services::rate_limit::AuthLimiter::new(config.auth_limits)),
+        operator_secret,
     };
 
     let app = Router::new()

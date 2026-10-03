@@ -17,4 +17,6 @@ pub struct AppState {
     pub llm:         Option<Arc<LlmClient>>,
     /// Login/signup attempt limiter (`AUTH_RATE_LIMIT_*`), in-process (#37).
     pub auth_limiter: Arc<AuthLimiter>,
+    /// `None` when `OPERATOR_SECRET` is unset; `/internal/effects` answers 404.
+    pub operator_secret: Option<Arc<str>>,
 }

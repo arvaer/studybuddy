@@ -45,6 +45,11 @@ pub struct Config {
     /// (default 5) attempts per `AUTH_RATE_LIMIT_WINDOW_SECS` (default 900)
     /// on login and signup. Each must be at least 1.
     pub auth_limits: AuthLimits,
+    /// `OPERATOR_SECRET`, optional, at least 16 characters. Set, the
+    /// operator's effect endpoints under `/internal/effects` are served and
+    /// accept only this bearer secret (19a); unset, they answer 404. Never
+    /// a learner's token, never logged.
+    pub operator_secret: Option<String>,
 }
 
 const DEFAULT_LLM_ALLOWED_HOSTS: &str = "api.anthropic.com,api.openai.com";
@@ -82,6 +87,7 @@ impl fmt::Debug for Config {
             .field("cookie_secure", &self.cookie_secure)
             .field("llm", &self.llm)
             .field("auth_limits", &self.auth_limits)
+            .field("operator_secret", &self.operator_secret.as_ref().map(|_| "<redacted>"))
             .finish()
     }
 }
@@ -141,7 +147,26 @@ impl Config {
 
         let auth_limits = Self::auth_limits(&get)?;
 
-        Ok(Self { database_url, jwt_secret, port, cors_origin, uploads_dir, log_filter, cookie_secure, llm, auth_limits })
+        let operator_secret = match get("OPERATOR_SECRET") {
+            None => None,
+            Some(s) if s.len() < 16 => {
+                return Err(ConfigError::Invalid("OPERATOR_SECRET", "at least 16 characters"));
+            }
+            Some(s) => Some(s),
+        };
+
+        Ok(Self {
+            database_url,
+            jwt_secret,
+            port,
+            cors_origin,
+            uploads_dir,
+            log_filter,
+            cookie_secure,
+            llm,
+            auth_limits,
+            operator_secret,
+        })
     }
 
     fn auth_limits(get: &impl Fn(&str) -> Option<String>) -> Result<AuthLimits, ConfigError> {
@@ -369,6 +394,17 @@ mod tests {
     fn debug_output_redacts_llm_key() {
         let text = format!("{:?}", with_llm(&[]).unwrap());
         assert!(!text.contains("llm-key"), "{text}");
+    }
+
+    #[test]
+    fn operator_secret_is_optional_bounded_and_redacted() {
+        assert!(Config::from_lookup(env(BASE)).unwrap().operator_secret.is_none());
+        let err = Config::from_lookup(env(&[BASE[0], BASE[1], ("OPERATOR_SECRET", "short")])).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid("OPERATOR_SECRET", _)));
+        assert!(!err.to_string().contains("short"));
+        let cfg = Config::from_lookup(env(&[BASE[0], BASE[1], ("OPERATOR_SECRET", "operator-secret-0123456789")])).unwrap();
+        assert_eq!(cfg.operator_secret.as_deref(), Some("operator-secret-0123456789"));
+        assert!(!format!("{cfg:?}").contains("operator-secret-0123456789"));
     }
 
     #[test]
