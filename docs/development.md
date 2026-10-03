@@ -45,6 +45,7 @@ Configuration is read once at startup by `backend/src/config.rs`, which is the s
 | `LLM_BASE_URL` | no | `https://api.anthropic.com` or `https://api.openai.com`; its host must be in `LLM_ALLOWED_HOSTS` |
 | `LLM_ALLOWED_HOSTS` | no | `api.anthropic.com,api.openai.com`; the only hosts the backend will call. For Ollama: `localhost` with `LLM_BASE_URL=http://localhost:11434` |
 | `LLM_TIMEOUT_SECS` | no | `30` (1..=600) |
+| `OPERATOR_SECRET` | no | unset means the operator's effect endpoints under `/internal/effects` answer 404. At least 16 characters; the bearer secret the embedded owner presents over loopback, never a learner's token (19a) |
 
 The browser never holds model credentials: the proxy accepts only `messages` and `maxTokens`, and any `provider`, `model`, `apiKey` or `baseUrl` field is rejected with 422. Provider failures map to 502 (unreachable, error status, unexpected body) or 504 (timeout); the provider's response body is never forwarded. `GET /api/llm/status` reports whether a provider is configured and which model, without the key.
 

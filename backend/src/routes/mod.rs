@@ -6,6 +6,7 @@ mod attempts;
 mod auth;
 mod concepts;
 mod health;
+mod internal;
 mod llm;
 mod notes;
 mod progress;
@@ -24,6 +25,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .merge(health::router())
         .merge(auth::router())
+        .merge(internal::router())
         .nest(
             "/api",
             Router::new()
