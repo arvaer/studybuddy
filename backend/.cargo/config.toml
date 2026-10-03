@@ -1,0 +1,4 @@
+# Cargo's built-in git fetch has no credentials for the capsule-corp
+# repository; the git CLI does.
+[net]
+git-fetch-with-cli = true

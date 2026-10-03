@@ -1,0 +1,3 @@
+# capsule-corp is gated on this version; the probe already used it.
+[toolchain]
+channel = "1.97.0"

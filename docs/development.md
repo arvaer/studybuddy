@@ -6,7 +6,7 @@ Verified on 2026-09-29 from a fresh checkout (see [baseline findings](baseline-f
 
 | Tool | Verified with | Notes |
 | --- | --- | --- |
-| Rust toolchain | 1.92.0 | No `rust-toolchain` file is pinned yet. |
+| Rust toolchain | 1.97.0 | Pinned by `backend/rust-toolchain.toml` since #18 (capsule-corp's gate). `backend/.cargo/config.toml` makes Cargo fetch git dependencies with the git CLI, which has the credentials for the capsule-corp repository. |
 | sqlx-cli | 0.8.6 | `cargo install sqlx-cli --no-default-features --features postgres` |
 | Node.js + npm | 26.1.0 / 11.13.0 | `package-lock.json` is authoritative; `bun.lockb` is also present. |
 | Docker | 29.x | Only for the disposable database below. |

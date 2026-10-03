@@ -1,0 +1,238 @@
+//! 18b: a session survives a restart on the real database, and one owner at
+//! a time holds a workspace. The probe's capsule and scripted providers,
+//! PgStorage in the `capsule` schema that migration 20240107 made.
+
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use capsule_corp::sdk::{Capsule, Effect, Outcome, Reply, Session};
+use capsule_host::owner::Handle;
+use operator::host::Record;
+use operator::{OperatorError, OperatorHost};
+use serde_json::json;
+use sqlx::PgPool;
+use uuid::Uuid;
+
+const CAPSULE: &str = include_str!("../../../../experiments/capsule-operator/learning.capsule");
+const ENVIRONMENT: &str = r#"
+(environment studybuddy-18b
+  (grant capability call/model :kind model-call)
+  (grant capability learning/present :kind tool :scope "workspaces/rl/*")
+  (grant capability learner/answer :kind tool :scope "workspaces/rl/*")
+  (require constraint max-bytes :kind structural :rule (rule (max-bytes 16384)))
+  (budget :evaluator-steps 20000 :boundary-effects 12))
+"#;
+const ASK: &str = r#"(coach/ask "workspaces/rl/lesson" "A gives 2 and ends; B gives 0 then 5. Which has greater return?")"#;
+
+type Calls = Arc<Mutex<Vec<Effect>>>;
+
+/// The test database's URL: `DATABASE_URL` with the database `#[sqlx::test]` made.
+async fn url(pool: &PgPool) -> String {
+    let (name,): (String,) = sqlx::query_as("SELECT current_database()")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let base = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+    let (prefix, _) = base.rsplit_once('/').expect("a database in DATABASE_URL");
+    format!("{prefix}/{name}")
+}
+
+async fn workspace(pool: &PgPool) -> Uuid {
+    let (user,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO users (email, password_hash, display_name) VALUES ($1, 'x', 'A') RETURNING id",
+    )
+    .bind(format!("{}@example.com", Uuid::new_v4()))
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let (ws,): (Uuid,) =
+        sqlx::query_as("INSERT INTO workspaces (user_id) VALUES ($1) RETURNING id")
+            .bind(user)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    ws
+}
+
+fn install(models: Calls, presents: Calls, forms: Vec<&'static str>) -> operator::host::Install {
+    Box::new(move |session: &mut Session<Record>| {
+        let mut forms = forms.into_iter();
+        session.provide("call/model", move |effect: &Effect| {
+            models.lock().unwrap().push(effect.clone());
+            Reply::Value(json!({"form": forms.next().expect("unexpected model call")}))
+        });
+        session.provide("learning/present", move |effect: &Effect| {
+            presents.lock().unwrap().push(effect.clone());
+            Reply::Value(json!([
+                "publication.v1",
+                effect.id(),
+                effect.payload()[0],
+                1
+            ]))
+        });
+    })
+}
+
+async fn lease(pool: &PgPool, ws: Uuid) -> (Option<Uuid>, bool) {
+    let (owner, live): (Option<Uuid>, Option<bool>) = sqlx::query_as(
+        "SELECT owner_lease, lease_until > now() FROM workspace_sessions WHERE workspace_id = $1",
+    )
+    .bind(ws)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    (owner, live.unwrap_or(false))
+}
+
+/// Start under the dedup id: the first time on a fresh instance, after a
+/// reopen on the instance the record already holds (a second instantiate
+/// would be a new instance and so a different run).
+fn start(handle: &Handle<Record>) -> capsule_corp::sdk::Run {
+    let instance = match handle.instances().unwrap().into_iter().next() {
+        Some(recorded) => recorded,
+        None => handle
+            .instantiate(Capsule::compile(CAPSULE).unwrap())
+            .unwrap()
+            .unwrap(),
+    };
+    handle
+        .run_once(
+            "start-1",
+            instance,
+            vec![json!("Practice reward versus return.")],
+        )
+        .unwrap()
+        .unwrap()
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_session_reopens_from_postgres_after_its_owner_stops(pool: PgPool) {
+    let ws = workspace(&pool).await;
+    let host = OperatorHost::new(
+        pool.clone(),
+        url(&pool).await,
+        "capsule",
+        Duration::from_secs(30),
+    );
+    let (models, presents) = (Calls::default(), Calls::default());
+
+    let handle = host
+        .open(
+            ws,
+            ENVIRONMENT,
+            install(models.clone(), presents.clone(), vec![ASK]),
+        )
+        .await
+        .unwrap();
+    let started = start(&handle);
+    assert!(matches!(started.outcome(), Outcome::Parked(_)));
+    let parked = handle.pending().unwrap();
+    assert_eq!(parked.len(), 1);
+    assert_eq!(parked[0].family(), "learner/answer");
+    let before = handle.inspect().unwrap();
+    assert_eq!(lease(&pool, ws).await, (Some(host.owner_id()), true));
+
+    host.close(ws).await.unwrap();
+    assert!(handle.pending().is_err(), "the old handle is gone");
+    assert_eq!(lease(&pool, ws).await, (None, false));
+    let (nodes,): (i64,) = sqlx::query_as("SELECT count(*) FROM capsule.nodes")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(nodes > 0, "the record is in the capsule schema");
+
+    // A new process: a new host, a new owner id, the same database.
+    let again = OperatorHost::new(
+        pool.clone(),
+        url(&pool).await,
+        "capsule",
+        Duration::from_secs(30),
+    );
+    let handle = again
+        .open(
+            ws,
+            ENVIRONMENT,
+            install(models.clone(), presents.clone(), vec![]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(handle.inspect().unwrap(), before, "same record");
+    assert_eq!(handle.pending().unwrap(), parked, "same park");
+    assert_eq!(handle.runs().unwrap().len(), 1);
+    assert_eq!(
+        start(&handle).form(),
+        started.form(),
+        "same start answers the recorded run"
+    );
+    assert_eq!(models.lock().unwrap().len(), 1, "reopen asked no provider");
+    assert_eq!(presents.lock().unwrap().len(), 1);
+    again.close(ws).await.unwrap();
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn one_owner_at_a_time_until_the_lease_lapses(pool: PgPool) {
+    let ws = workspace(&pool).await;
+    let first = OperatorHost::new(
+        pool.clone(),
+        url(&pool).await,
+        "capsule",
+        Duration::from_secs(30),
+    );
+    let second = OperatorHost::new(
+        pool.clone(),
+        url(&pool).await,
+        "capsule",
+        Duration::from_secs(30),
+    );
+    let quiet = || install(Calls::default(), Calls::default(), vec![]);
+
+    first.open(ws, ENVIRONMENT, quiet()).await.unwrap();
+    assert!(matches!(
+        second.open(ws, ENVIRONMENT, quiet()).await,
+        Err(OperatorError::Leased(w)) if w == ws
+    ));
+    assert!(matches!(second.handle(ws), Err(OperatorError::NotOpen(_))));
+
+    assert_eq!(first.renew_leases().await.unwrap(), 1);
+
+    // The first process dies without releasing; its lease runs out.
+    sqlx::query("UPDATE workspace_sessions SET lease_until = now() - interval '1 second' WHERE workspace_id = $1")
+        .bind(ws)
+        .execute(&pool)
+        .await
+        .unwrap();
+    second.open(ws, ENVIRONMENT, quiet()).await.unwrap();
+    assert_eq!(lease(&pool, ws).await, (Some(second.owner_id()), true));
+    assert_eq!(
+        first.renew_leases().await.unwrap(),
+        0,
+        "a lost lease is not renewed"
+    );
+
+    second.close(ws).await.unwrap();
+    first.close(ws).await.unwrap();
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_changed_environment_is_refused_on_reopen(pool: PgPool) {
+    let ws = workspace(&pool).await;
+    let host = OperatorHost::new(
+        pool.clone(),
+        url(&pool).await,
+        "capsule",
+        Duration::from_secs(30),
+    );
+    let quiet = || install(Calls::default(), Calls::default(), vec![]);
+    host.open(ws, ENVIRONMENT, quiet()).await.unwrap();
+    host.close(ws).await.unwrap();
+    let widened = ENVIRONMENT.replace("workspaces/rl/*", "workspaces/*");
+    assert!(matches!(
+        host.open(ws, &widened, quiet()).await,
+        Err(OperatorError::Session(_))
+    ));
+    assert_eq!(
+        lease(&pool, ws).await,
+        (None, false),
+        "a refused open holds no lease"
+    );
+}
