@@ -8,7 +8,6 @@
 //! same id is answered with the first row, never a second row.
 
 use serde_json::Value as Json;
-use sqlx::PgPool;
 use uuid::Uuid;
 
 /// One effect, performed once.
@@ -64,7 +63,7 @@ pub async fn record(
 /// The receipt for `effect_id` in `workspace`, if the effect was performed.
 /// Scoped to the workspace: another workspace's receipt settles nothing here.
 pub async fn find(
-    pool: &PgPool,
+    exec: impl sqlx::PgExecutor<'_>,
     workspace: Uuid,
     effect_id: &str,
 ) -> Result<Option<Receipt>, sqlx::Error> {
@@ -74,6 +73,6 @@ pub async fn find(
     )
     .bind(effect_id)
     .bind(workspace)
-    .fetch_optional(pool)
+    .fetch_optional(exec)
     .await
 }

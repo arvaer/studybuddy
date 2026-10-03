@@ -1,5 +1,7 @@
 //! Authoring and reading activities (#41). See docs/learning-records.md.
 
+use std::ops::DerefMut;
+
 use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
@@ -11,14 +13,66 @@ use domain::repository_traits::ActivityRepository;
 
 use super::owned;
 
+/// A connection for one repository call, however it was obtained.
+pub type Conn<'a> = Box<dyn DerefMut<Target = PgConnection> + Send + 'a>;
+
+/// Where a repository call gets its connection: the pool, one per call, or a
+/// connection the caller already holds. The second is how the operator's
+/// effect endpoint (19a) runs `create` on the transaction that also writes
+/// the effect receipt, so the activity and the receipt land together or not
+/// at all, while the manual route and the endpoint share every line of SQL.
+pub trait Source: Send + Sync {
+    fn conn(&self) -> impl std::future::Future<Output = Result<Conn<'_>, DomainError>> + Send;
+}
+
+impl Source for PgPool {
+    async fn conn(&self) -> Result<Conn<'_>, DomainError> {
+        Ok(Box::new(self.acquire().await.map_err(db)?))
+    }
+}
+
+/// A connection the caller holds, lent to the repository for its lifetime.
+/// `begin` on it opens a savepoint when the caller is mid-transaction, so
+/// the repository's own commit is the caller's to keep or roll back.
+pub struct Held<'c>(tokio::sync::Mutex<&'c mut PgConnection>);
+
+struct HeldGuard<'a, 'c>(tokio::sync::MutexGuard<'a, &'c mut PgConnection>);
+
+impl std::ops::Deref for HeldGuard<'_, '_> {
+    type Target = PgConnection;
+    fn deref(&self) -> &PgConnection {
+        &self.0
+    }
+}
+
+impl DerefMut for HeldGuard<'_, '_> {
+    fn deref_mut(&mut self) -> &mut PgConnection {
+        &mut self.0
+    }
+}
+
+impl Source for Held<'_> {
+    async fn conn(&self) -> Result<Conn<'_>, DomainError> {
+        Ok(Box::new(HeldGuard(self.0.lock().await)))
+    }
+}
+
 #[derive(Clone)]
-pub struct PgActivityRepository {
-    pool: PgPool,
+pub struct PgActivityRepository<S: Source = PgPool> {
+    source: S,
 }
 
 impl PgActivityRepository {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self { source: pool }
+    }
+}
+
+impl<'c> PgActivityRepository<Held<'c>> {
+    /// A repository over a connection the caller holds, typically a
+    /// transaction it will commit after writing more on it.
+    pub fn held(conn: &'c mut PgConnection) -> Self {
+        Self { source: Held(tokio::sync::Mutex::new(conn)) }
     }
 }
 
@@ -126,9 +180,10 @@ impl TryFrom<CurrentRow> for ActivityWithRevision {
     }
 }
 
-impl PgActivityRepository {
+impl<S: Source> PgActivityRepository<S> {
     /// `activity_id` narrows to one activity; `None` lists all of the owner's.
     async fn current(&self, user_id: Uuid, activity_id: Option<Uuid>) -> Result<Vec<ActivityWithRevision>, DomainError> {
+        let mut conn = self.source.conn().await?;
         sqlx::query_as!(
             CurrentRow,
             r#"
@@ -148,7 +203,7 @@ impl PgActivityRepository {
             user_id,
             activity_id,
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut **conn)
         .await
         .map_err(db)?
         .into_iter()
@@ -157,15 +212,16 @@ impl PgActivityRepository {
     }
 }
 
-impl ActivityRepository for PgActivityRepository {
+impl<S: Source> ActivityRepository for PgActivityRepository<S> {
     async fn create(&self, cmd: NewActivity) -> Result<ActivityWithRevision, DomainError> {
         cmd.content.validate()?;
+        let mut conn = self.source.conn().await?;
         // Linked ids must be the caller's. Ownership never changes, so the
         // check can precede the transaction (docs/ownership.md, point 3).
-        owned::concepts(&self.pool, cmd.user_id, cmd.concept_id.as_slice()).await?;
-        owned::resource(&self.pool, cmd.user_id, cmd.content.source_resource_id).await?;
+        owned::concepts(&mut **conn, cmd.user_id, cmd.concept_id.as_slice()).await?;
+        owned::resource(&mut **conn, cmd.user_id, cmd.content.source_resource_id).await?;
 
-        let mut tx = self.pool.begin().await.map_err(db)?;
+        let mut tx = sqlx::Connection::begin(&mut **conn).await.map_err(db)?;
         let row = sqlx::query!(
             r#"
             INSERT INTO activities (user_id, concept_id, kind)
@@ -196,9 +252,10 @@ impl ActivityRepository for PgActivityRepository {
 
     async fn revise(&self, cmd: NewRevision) -> Result<ActivityRevision, DomainError> {
         cmd.content.validate()?;
-        owned::resource(&self.pool, cmd.user_id, cmd.content.source_resource_id).await?;
+        let mut conn = self.source.conn().await?;
+        owned::resource(&mut **conn, cmd.user_id, cmd.content.source_resource_id).await?;
 
-        let mut tx = self.pool.begin().await.map_err(db)?;
+        let mut tx = sqlx::Connection::begin(&mut **conn).await.map_err(db)?;
         // Ownership predicate and row lock first. Concurrent revisions of
         // the same activity queue on this lock.
         sqlx::query_scalar!(
@@ -239,6 +296,7 @@ impl ActivityRepository for PgActivityRepository {
     }
 
     async fn find_revision(&self, revision_id: Uuid, user_id: Uuid) -> Result<ActivityRevision, DomainError> {
+        let mut conn = self.source.conn().await?;
         let row = sqlx::query!(
             r#"
             SELECT r.id, r.activity_id, r.revision, r.prompt, r.options, r.answer_key, r.rubric,
@@ -250,7 +308,7 @@ impl ActivityRepository for PgActivityRepository {
             revision_id,
             user_id,
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut **conn)
         .await
         .map_err(db)?
         .ok_or_else(|| DomainError::NotFound(format!("activity revision {revision_id}")))?;
