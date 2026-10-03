@@ -17,11 +17,16 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use capsule_corp::sdk::{Environment, EnvironmentError, Session, SessionError, StorageError};
+use capsule_corp::sdk::{
+    Completed, Environment, EnvironmentError, Park, Reply, RunError, Session, SessionError,
+    StorageError,
+};
 use capsule_host::owner::{Gone, Handle, Owner};
 use capsule_host::postgres::PgStorage;
 use sqlx::PgPool;
 use uuid::Uuid;
+
+use crate::receipts;
 
 /// The storage every StudyBuddy session lives in.
 pub type Record = PgStorage;
@@ -44,6 +49,28 @@ pub enum OperatorError {
     Gone(#[from] Gone),
     #[error("the owner thread could not be joined")]
     Join,
+    #[error("run: {0}")]
+    Run(#[from] RunError),
+}
+
+/// A pending effect settled from its receipt on reconcile.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Settled {
+    pub effect_id: String,
+    pub family: String,
+    pub completed: Completed,
+}
+
+/// What reconciling a workspace's pending effects came to.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Reconciled {
+    /// Completed from a receipt: performed before, reply now on the record
+    /// (or already there).
+    pub settled: Vec<Settled>,
+    /// Pending with no receipt: never performed, or performed and not
+    /// committed. The caller dispatches them, or denies them, or, for one
+    /// the provider left `uncertain`, allows it again under the same id.
+    pub unsettled: Vec<Park>,
 }
 
 /// Installs providers (and a router, if any) on a freshly opened session,
@@ -155,6 +182,33 @@ impl OperatorHost {
             .await
             .map_err(|_| OperatorError::Join)?;
         self.release(workspace).await
+    }
+
+    /// Settle what the record owes an answer from what the application
+    /// performed (H3, the four crash points): every pending park whose
+    /// effect id has a receipt in this workspace is completed with the
+    /// receipt's payload; the record answers `Recorded` if the reply lands
+    /// now and `Already` if it landed before the crash. Parks without a
+    /// receipt are handed back untouched. Reopen never asks a provider, so
+    /// call this after `open` and before dispatching anything.
+    pub async fn reconcile(&self, workspace: Uuid) -> Result<Reconciled, OperatorError> {
+        let handle = self.handle(workspace)?;
+        let mut reconciled = Reconciled::default();
+        for park in handle.pending()? {
+            match receipts::find(&self.pool, workspace, park.digest()).await? {
+                Some(receipt) => {
+                    let completed =
+                        handle.complete(park.digest(), Reply::Value(receipt.payload))??;
+                    reconciled.settled.push(Settled {
+                        effect_id: receipt.effect_id,
+                        family: receipt.family,
+                        completed,
+                    });
+                }
+                None => reconciled.unsettled.push(park),
+            }
+        }
+        Ok(reconciled)
     }
 
     /// Push every held lease out by the TTL. Call it on an interval shorter
