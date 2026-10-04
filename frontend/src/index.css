@@ -306,3 +306,23 @@
     opacity: 1;
   }
 }
+
+/* Code colors (tok-* classes from Lezer's classHighlighter): the answer
+   editor and rendered Markdown share them. */
+@layer components {
+  .tok-keyword { color: #cf222e; }
+  .tok-string, .tok-string2 { color: #0a3069; }
+  .tok-number, .tok-bool, .tok-atom, .tok-literal { color: #0550ae; }
+  .tok-comment { color: #6e7781; font-style: italic; }
+  .tok-variableName.tok-definition, .tok-propertyName.tok-definition { color: #8250df; }
+  .tok-className, .tok-typeName, .tok-namespace { color: #953800; }
+  .tok-variableName2, .tok-macroName { color: #0550ae; }
+
+  .dark .tok-keyword { color: #ff7b72; }
+  .dark .tok-string, .dark .tok-string2 { color: #a5d6ff; }
+  .dark .tok-number, .dark .tok-bool, .dark .tok-atom, .dark .tok-literal { color: #79c0ff; }
+  .dark .tok-comment { color: #8b949e; }
+  .dark .tok-variableName.tok-definition, .dark .tok-propertyName.tok-definition { color: #d2a8ff; }
+  .dark .tok-className, .dark .tok-typeName, .dark .tok-namespace { color: #ffa657; }
+  .dark .tok-variableName2, .dark .tok-macroName { color: #79c0ff; }
+}
