@@ -60,6 +60,7 @@ pub type Installer = Arc<dyn Fn(&mut Session<Record>) + Send + Sync>;
 
 const PRESENT_FAMILY: &str = "learning/present";
 const ASSESS_FAMILY: &str = "learning/assess";
+const SOURCE_FAMILY: &str = "source/read";
 /// How long a dead process keeps a workspace from its successor. Renewed
 /// every `LEASE_RENEWAL` by a live one; short, because every backend
 /// restart during a session is exactly this wait (20e).
@@ -142,7 +143,7 @@ impl OperatorRuntime {
         let (base_url, secret) = (self.base_url.clone(), Arc::clone(&self.secret));
         let install: Install = Box::new(move |session: &mut Session<Record>| {
             installer(session);
-            for family in [PRESENT_FAMILY, ASSESS_FAMILY] {
+            for family in [PRESENT_FAMILY, ASSESS_FAMILY, SOURCE_FAMILY] {
                 session.provide(
                     family,
                     operator::providers::effect_client(
@@ -191,26 +192,62 @@ impl OperatorRuntime {
     }
 
     /// Start the run that serves `goal_revision` with `intent`, in the
-    /// background, once: the revision id is the run's dedup key.
+    /// background, once: the revision id is the run's dedup key. The run's
+    /// one argument is the task text: the goal and, under it, the learner's
+    /// sources (21a), what the coach may read, each by id, title and page
+    /// count. Text, because the adapter's task is text.
     pub fn start(self: &Arc<Self>, workspace: Uuid, goal_revision: Uuid, intent: String) {
         self.think(workspace, "start", move |runtime| async move {
+            let task = runtime.task(workspace, &intent).await?;
             let handle = runtime.open(workspace).await?;
-            let run =
-                tokio::task::spawn_blocking(move || -> Result<_, OperatorError> {
-                    let instance = match handle.instances()?.into_iter().next() {
-                        Some(recorded) => recorded,
-                        None => handle.instantiate(capsule::compile(workspace)?)??,
-                    };
-                    Ok(handle.run_once(
-                        &goal_revision.to_string(),
-                        instance,
-                        vec![json!(intent)],
-                    )??)
-                })
-                .await
-                .map_err(|_| OperatorError::Join)??;
+            let run = tokio::task::spawn_blocking(move || -> Result<_, OperatorError> {
+                // The instance of the capsule as it is in this build: the
+                // recorded one when its definition is the same, else a new
+                // one, so a change to the program reaches every workspace
+                // at its next goal (and the record keeps the old instance).
+                let compiled = capsule::compile(workspace)?;
+                let definition = compiled.definition().address().to_string();
+                let current = handle
+                    .instances()?
+                    .into_iter()
+                    .find(|recorded| recorded.definition() == definition);
+                let instance = match current {
+                    Some(recorded) => recorded,
+                    None => {
+                        tracing::info!(workspace = %workspace, %definition, "instantiating the capsule as this build has it");
+                        handle.instantiate(compiled)??
+                    }
+                };
+                Ok(handle.run_once(&goal_revision.to_string(), instance, vec![json!(task)])??)
+            })
+            .await
+            .map_err(|_| OperatorError::Join)??;
             Ok(describe(run.outcome()))
         });
+    }
+
+    /// The task text: the intent, then the learner's sources as the coach
+    /// is told of them, one line each with id, title and page count, newest
+    /// first, at most twenty. The intent alone when there are none.
+    async fn task(&self, workspace: Uuid, intent: &str) -> Result<String, OperatorError> {
+        let rows: Vec<(Uuid, String, Option<i32>)> = sqlx::query_as(
+            "SELECT r.id, r.title, jsonb_array_length(r.content_pages)::int
+             FROM resources r JOIN workspaces w ON w.user_id = r.user_id
+             WHERE w.id = $1 AND r.content_pages IS NOT NULL
+             ORDER BY r.added_at DESC LIMIT 20",
+        )
+        .bind(workspace)
+        .fetch_all(&self.pool)
+        .await?;
+        if rows.is_empty() {
+            return Ok(intent.to_string());
+        }
+        let mut task =
+            format!("{intent}\n\nSources the learner uploaded (read them with coach/read by id):");
+        for (id, title, pages) in rows {
+            task.push_str(&format!("\n- {id}: {title}, {} pages", pages.unwrap_or(0)));
+        }
+        Ok(task)
     }
 
     /// What the workspace's pending parks are owed: a receipt already on

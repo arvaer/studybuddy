@@ -76,10 +76,14 @@ Order: 18a → 18b → 18c → 19a → 19b → 19c → 20a → 20b → 20d-i →
 
 ## First Phase 3 slices this unlocks
 
-Filed now so the Phase 2 work keeps their data in reach; built after 20d.
+Filed now so the Phase 2 work keeps their data in reach; built after 20d. Owner, 2026-10-03: "I wanna get to the interactive learning stuff where the operator is monitoring the stuff." Build order: 21a → 21b → 21c → 21d, ahead of 20c.
 
 | Ticket | Slice |
 | --- | --- |
+| **21a Source read** | The run starts with `(goal sources)`: the learner's uploaded sources by id, title and page count. `coach/read id from to` applies a read-only `source/read` effect (no receipt; at most four pages of 4000 characters) and the coach names source and page in its prompts. |
+| **21b Source spans** | `coach/present` takes an optional citation `(resource-id page)`, stored as the revision's `source_resource_id` and `source_location {page}`; the card shows the cited page beside the prompt. |
+| **21c Reading is a signal** | The Learn page reports page views (`resource, page, seconds`) to the workspace; the wait's answer carries what was read since the last wake, so the coach sees the reading with the attempt. |
+| **21d Wake context recorded** | Each model call's handed-in context as a node (the "Wake context, recorded" slice below), the first consumer being the context policy. |
 | **Source spans** | A revision's `source_location` becomes `{page, start, end}` the quiz page renders beside the question from `/api/resources/{id}/pages`, so the learner reads the passage inside the activity. Pretests and gated passages are then just activities. |
 | **Source navigator** | At upload, derive a structure tree (headings with page ranges) from the page text and store it on the resource. A read-only `source.locate` effect walks the tree with the model and returns page ranges, the vectorless-RAG pattern; the operator cites them. Shaped as upstream's reader child once delegation is exercised. |
 | **Assessed explanations** | `assessments.method = model` for `explain` activities, produced by the operator after the attempt, never by the publication path; pending until then. |

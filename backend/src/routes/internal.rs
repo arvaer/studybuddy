@@ -23,7 +23,9 @@
 //! neither does, and a replayed id answers the receipt and writes nothing.
 //! An assessment that names an attempt this learner does not have answers
 //! a value saying so rather than a refusal, so a slip by the model does not
-//! end the run.
+//! end the run. A third, `source/read` at `source.read` (21a), is a
+//! read-only look at pages of the learner's own sources: no receipt, a
+//! page cap, and `{"found": false}` for an id that is not theirs.
 
 use axum::{
     body::Bytes,
@@ -56,6 +58,11 @@ const PRESENT_PATH: &str = "learning.present";
 const PRESENT_FAMILY: &str = "learning/present";
 const ASSESS_PATH: &str = "learning.assess";
 const ASSESS_FAMILY: &str = "learning/assess";
+const SOURCE_PATH: &str = "source.read";
+const SOURCE_FAMILY: &str = "source/read";
+/// The most pages one read answers, and the most characters of each.
+const READ_MAX_PAGES: usize = 4;
+const READ_MAX_CHARS: usize = 4000;
 
 /// The effect as the connector posts it.
 #[derive(Debug, Deserialize)]
@@ -138,6 +145,7 @@ async fn effect(
     let served = match family.as_str() {
         PRESENT_PATH => PRESENT_FAMILY,
         ASSESS_PATH => ASSESS_FAMILY,
+        SOURCE_PATH => SOURCE_FAMILY,
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     let req: EffectRequest = match serde_json::from_slice(&body) {
@@ -169,10 +177,10 @@ async fn effect(
         Err(e) => return database(e),
     };
 
-    let served = if served == PRESENT_FAMILY {
-        present(&state, workspace, owner, &req).await
-    } else {
-        assess(&state, workspace, owner, &req).await
+    let served = match served {
+        PRESENT_FAMILY => present(&state, workspace, owner, &req).await,
+        ASSESS_FAMILY => assess(&state, workspace, owner, &req).await,
+        _ => read(&state, workspace, owner, &req).await,
     };
     match served {
         Ok(reply) | Err(reply) => reply,
@@ -223,6 +231,73 @@ fn parse_assess(workspace: Uuid, payload: &[Value]) -> Result<(String, String, S
         outcome.to_string(),
         feedback.to_string(),
     ))
+}
+
+/// `[path, resource-id, from, to]` (`coach/read`): pages `from..=to`,
+/// 1-based, of one of the learner's sources. Read-only, so no receipt: a
+/// crash mid-read is served again under the same id. At most
+/// `READ_MAX_PAGES` pages of `READ_MAX_CHARS` each, so one read stays a
+/// few thousand tokens in the turns that follow. A resource that is not
+/// this learner's, or has no page text, answers `{"found": false}`.
+async fn read(
+    state: &AppState,
+    workspace: Uuid,
+    owner: Uuid,
+    req: &EffectRequest,
+) -> Result<Response, Response> {
+    let [path, resource, from, to] = req.payload.as_slice() else {
+        return Err(refused(format!(
+            "{SOURCE_FAMILY} takes [path resource-id from to]"
+        )));
+    };
+    scoped_path(workspace, path)?;
+    let not_found = |why: String| Ok(value(json!({ "found": false, "why": why })));
+    let Some(resource) = resource.as_str().and_then(|r| r.parse::<Uuid>().ok()) else {
+        return not_found(format!("{resource} is not a resource id"));
+    };
+    let (Some(from), Some(to)) = (from.as_u64(), to.as_u64()) else {
+        return Err(refused("from and to must be page numbers, 1-based"));
+    };
+    let row: Option<(String, Option<Value>)> =
+        sqlx::query_as("SELECT title, content_pages FROM resources WHERE id = $1 AND user_id = $2")
+            .bind(resource)
+            .bind(owner)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(database)?;
+    let Some((title, pages)) = row else {
+        return not_found(format!("no source {resource} for this learner"));
+    };
+    let pages: Vec<String> = pages
+        .and_then(|p| serde_json::from_value(p).ok())
+        .unwrap_or_default();
+    if pages.is_empty() {
+        return not_found(format!("{title} has no page text"));
+    }
+    let count = pages.len();
+    let from = (from.max(1) as usize).min(count);
+    let to = (to as usize)
+        .clamp(from, count)
+        .min(from + READ_MAX_PAGES - 1);
+    let read: Vec<Value> = (from..=to)
+        .map(|n| {
+            let text = &pages[n - 1];
+            let text = match text.char_indices().nth(READ_MAX_CHARS) {
+                Some((cut, _)) => format!("{}…", &text[..cut]),
+                None => text.clone(),
+            };
+            json!({ "page": n, "text": text })
+        })
+        .collect();
+    Ok(value(json!({
+        "found": true,
+        "resourceId": resource,
+        "title": title,
+        "pageCount": count,
+        "from": from,
+        "to": to,
+        "pages": read,
+    })))
 }
 
 /// The operator's assessment of an attempt, on one transaction with its
@@ -722,6 +797,132 @@ mod tests {
         let (_, odd) = send(&app, post(&assess_uri(ws), Some(SECRET), &odd)).await;
         assert_eq!(odd["value"]["assessed"], false, "{odd}");
         assert_eq!(assess_counts(&pool).await, (1, 3));
+    }
+
+    /// A source with page text, owned by `user`.
+    async fn source(pool: &PgPool, user: Uuid, title: &str, pages: Vec<String>) -> Uuid {
+        let topic: Uuid =
+            sqlx::query_scalar("INSERT INTO topics (user_id, name) VALUES ($1, 'T') RETURNING id")
+                .bind(user)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        sqlx::query_scalar(
+            "INSERT INTO resources (user_id, topic_id, title, resource_type, content_pages)
+             VALUES ($1, $2, $3, 'pdf', $4) RETURNING id",
+        )
+        .bind(user)
+        .bind(topic)
+        .bind(title)
+        .bind(json!(pages))
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    fn read_body(id: &str, path: &str, resource: &str, from: u64, to: u64) -> Value {
+        json!({ "id": id, "capability": SOURCE_FAMILY, "payload": [path, resource, from, to] })
+    }
+
+    /// The coach reads pages of the learner's own source: capped in pages
+    /// and characters, no receipt; another learner's source is not found.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn the_coach_reads_pages_of_the_learners_source(pool: PgPool) {
+        let user = learner(&pool, "owner@example.com").await;
+        let ws = workspace(&pool, user).await;
+        let app = app(pool.clone(), Some(SECRET)).await;
+        let path = format!("workspaces/{ws}/activities");
+        let long = "x".repeat(READ_MAX_CHARS + 50);
+        let pages: Vec<String> = (1..=6)
+            .map(|n| {
+                if n == 2 {
+                    long.clone()
+                } else {
+                    format!("page {n} text")
+                }
+            })
+            .collect();
+        let book = source(&pool, user, "RL book", pages).await;
+        let uri = format!("/internal/effects/{ws}/{SOURCE_PATH}");
+
+        let (status, reply) = send(
+            &app,
+            post(
+                &uri,
+                Some(SECRET),
+                &read_body("sha256:r1", &path, &book.to_string(), 1, 10),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{reply}");
+        let got = &reply["value"];
+        assert_eq!(got["found"], true, "{got}");
+        assert_eq!(got["title"], "RL book");
+        assert_eq!(
+            (&got["pageCount"], &got["from"], &got["to"]),
+            (&json!(6), &json!(1), &json!(4))
+        );
+        let texts: Vec<&str> = got["pages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["text"].as_str().unwrap())
+            .collect();
+        assert_eq!(texts[0], "page 1 text");
+        assert_eq!(
+            texts[1].chars().count(),
+            READ_MAX_CHARS + 1,
+            "cut, with a mark"
+        );
+        assert!(texts[1].ends_with('…'));
+        assert_eq!(got["pages"][3]["page"], 4);
+
+        // Past the end clamps; a read of one page is one page.
+        let (_, tail) = send(
+            &app,
+            post(
+                &uri,
+                Some(SECRET),
+                &read_body("sha256:r2", &path, &book.to_string(), 6, 9),
+            ),
+        )
+        .await;
+        assert_eq!(
+            (&tail["value"]["from"], &tail["value"]["to"]),
+            (&json!(6), &json!(6))
+        );
+
+        // Another learner's source, or no such id: not found, not refused.
+        let other = learner(&pool, "other@example.com").await;
+        let theirs = source(&pool, other, "Theirs", vec!["secret".into()]).await;
+        let (_, denied) = send(
+            &app,
+            post(
+                &uri,
+                Some(SECRET),
+                &read_body("sha256:r3", &path, &theirs.to_string(), 1, 1),
+            ),
+        )
+        .await;
+        assert_eq!(denied["value"]["found"], false, "{denied}");
+        assert!(denied.to_string().contains("secret") == false);
+        let (_, odd) = send(
+            &app,
+            post(
+                &uri,
+                Some(SECRET),
+                &read_body("sha256:r4", &path, "not-an-id", 1, 1),
+            ),
+        )
+        .await;
+        assert_eq!(odd["value"]["found"], false, "{odd}");
+
+        // Reads leave no receipt.
+        let (receipts,): (i64,) = sqlx::query_as("SELECT count(*) FROM effect_receipts")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(receipts, 0);
     }
 
     #[sqlx::test(migrations = "./migrations")]
