@@ -27,7 +27,8 @@ import {
 } from "@/components/ui/select";
 import { fetchTopics, fetchConcepts } from "@/lib/api";
 import { fetchActivities, type Activity, type AttemptStatus } from "@/lib/activities";
-import { fetchCurrentWorkspace, fetchWorkspace, setGoal, operatorLine, shouldPoll, type Workspace } from "@/lib/workspace";
+import { canSetGoal, fetchCurrentWorkspace, fetchWorkspace, setGoal, operatorLine, shouldPoll, type Workspace } from "@/lib/workspace";
+import { Prompt } from "@/components/prompt";
 import { IntentBox } from "@/components/intent-box";
 import { ActivityCard } from "@/components/activity-card";
 import { QuizAiChat } from "@/components/quiz-ai-chat";
@@ -247,6 +248,30 @@ export default function QuizPage() {
       <AppLayout>
         <div className="flex-1 flex items-center justify-center p-8 min-h-full">
           <IntentBox onSubmit={startGoal} />
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // The coach finished (or stopped): its closing summary, whole, and the
+  // box for the next goal. Nothing else competes with it on the page.
+  if (workspace && canSetGoal(workspace)) {
+    return (
+      <AppLayout>
+        <div className="flex-1 flex flex-col items-center justify-center gap-8 p-8 min-h-full">
+          {workspace.summary ? (
+            <Card className="p-8 w-full max-w-xl" data-testid="finish-summary">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground mb-3">
+                Goal: {workspace.goal?.intent}
+              </p>
+              <div className="font-display text-lg leading-relaxed text-foreground">
+                <Prompt>{workspace.summary}</Prompt>
+              </div>
+            </Card>
+          ) : (
+            operatorStatus && <p className="text-muted-foreground">{operatorStatus}</p>
+          )}
+          <IntentBox onSubmit={startGoal} title="What next?" />
         </div>
       </AppLayout>
     );

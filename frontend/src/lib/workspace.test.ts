@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { operatorLine, setGoal, shouldPoll, type Workspace } from "./workspace";
+import { canSetGoal, operatorLine, setGoal, shouldPoll, type Workspace } from "./workspace";
 
 const base: Workspace = {
   id: "ws-1",
@@ -21,7 +21,11 @@ describe("operator line", () => {
     expect(operatorLine({ ...base, operator: "unavailable", why: "leased" })).toMatch(/coming back/);
     expect(shouldPoll({ ...base, operator: "unavailable" })).toBe(true);
     expect(operatorLine({ ...base, operator: "stalled", families: ["call/model"] })).toContain("call/model");
-    expect(operatorLine({ ...base, operator: "idle", last: "done: [\"done\",\"ok\"]" })).toContain("done");
+    expect(operatorLine({ ...base, operator: "idle", last: "refused: x" })).toContain("stopped");
+    expect(operatorLine({ ...base, operator: "idle", last: "done", summary: "Well done." })).toMatch(/finished/);
+    expect(canSetGoal({ ...base, operator: "idle", summary: "Well done." })).toBe(true);
+    expect(canSetGoal({ ...base, operator: "waiting" })).toBe(false);
+    expect(canSetGoal({ ...base, goal: null, operator: "idle" })).toBe(true);
     expect(shouldPoll({ ...base, operator: "thinking" })).toBe(true);
     expect(shouldPoll({ ...base, operator: "waiting" })).toBe(false);
     expect(shouldPoll(null)).toBe(false);
