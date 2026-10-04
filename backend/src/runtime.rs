@@ -66,6 +66,7 @@ pub type Installer = Arc<dyn Fn(&mut Session<Record>, &Wakes) + Send + Sync>;
 const PRESENT_FAMILY: &str = "learning/present";
 const ASSESS_FAMILY: &str = "learning/assess";
 const SOURCE_FAMILY: &str = "source/read";
+const LOCATE_FAMILY: &str = "source/locate";
 const HINT_FAMILY: &str = "learning/hint";
 /// How long a dead process keeps a workspace from its successor. Renewed
 /// every `LEASE_RENEWAL` by a live one; short, because every backend
@@ -155,7 +156,13 @@ impl OperatorRuntime {
         let wakes = Wakes::new(workspace, self.wakes.clone());
         let install: Install = Box::new(move |session: &mut Session<Record>| {
             installer(session, &wakes);
-            for family in [PRESENT_FAMILY, ASSESS_FAMILY, SOURCE_FAMILY, HINT_FAMILY] {
+            for family in [
+                PRESENT_FAMILY,
+                ASSESS_FAMILY,
+                SOURCE_FAMILY,
+                LOCATE_FAMILY,
+                HINT_FAMILY,
+            ] {
                 session.provide(
                     family,
                     operator::providers::effect_client(

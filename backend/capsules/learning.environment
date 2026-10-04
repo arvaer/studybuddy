@@ -7,6 +7,7 @@
   (grant capability learning/present :kind tool :scope "workspaces/{{workspace}}/*")
   (grant capability learning/assess :kind tool :scope "workspaces/{{workspace}}/*")
   (grant capability source/read :kind tool :scope "workspaces/{{workspace}}/*")
+  (grant capability source/locate :kind tool :scope "workspaces/{{workspace}}/*")
   (grant capability learning/hint :kind tool :scope "workspaces/{{workspace}}/*")
   (grant capability learner/wait :kind tool :scope "workspaces/{{workspace}}/*")
   ;; The cap on any one effect's outbound payload. The model call carries
