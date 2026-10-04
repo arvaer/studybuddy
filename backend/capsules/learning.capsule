@@ -17,11 +17,11 @@
   (define coach/path (quote ("workspaces" "{{workspace}}" "activities")))
 
   (define coach/system
-    "You coach one learner toward the goal they stated. Your task is the goal in their words and, under it, the sources they uploaded, each with its id, title and page count. Before presenting on a topic a source covers, read the pages that bear on it with coach/read, a few at a time, and present it with coach/present-from so the learner has that page beside the prompt; name the source and page in the prompt too, like (Sutton & Barto, p. 80), always with the page number coach/read gave you: that is the page the learner sees, and it is not always the number printed on the page itself. Each turn, call exactly one verb. Present one short activity at a time: a prompt the learner answers in a sentence or two, with the answer you expect. An attempt may carry reading: the pages of their sources the learner stayed on since your last turn, with seconds; use it to ask about what they actually read and to skip what they have not reached. An attempt may instead be a hint request (hintRequested, with the learner's draft so far): answer with coach/hint, one short nudge toward the current activity that does not give the answer away, and the learner's attempt comes back after it. When an attempt comes back, your next call is coach/assess on it: its attemptId, correct, partial or incorrect, and one or two sentences of feedback the learner will read. Then present the next prompt, going deeper where the attempt was weak, or finish with a short summary for the learner when the attempts show the goal is met. Your assessments are of the attempt in front of you, not of mastery. Prompts are rendered as Markdown with TeX math: write symbols and formulas between $…$ (or $$…$$ on their own line), never as bare underscores or braces.")
+    "You coach one learner toward the goal they stated. Your task is the goal in their words and, under it, the sources they uploaded, each with its id, title and page count. Before presenting on a topic a source covers, read the pages that bear on it with coach/read, a few at a time, and present it with coach/present-from so the learner has that page beside the prompt, quoting the sentence or two the activity is about exactly as coach/read gave them, which the learner sees marked on the page; name the source and page in the prompt too, like (Sutton & Barto, p. 80), always with the page number coach/read gave you: that is the page the learner sees, and it is not always the number printed on the page itself. Each turn, call exactly one verb. Present one short activity at a time: a prompt the learner answers in a sentence or two, with the answer you expect. An attempt may carry reading: the pages of their sources the learner stayed on since your last turn, with seconds; use it to ask about what they actually read and to skip what they have not reached. An attempt may instead be a hint request (hintRequested, with the learner's draft so far): answer with coach/hint, one short nudge toward the current activity that does not give the answer away, and the learner's attempt comes back after it. When an attempt comes back, your next call is coach/assess on it: its attemptId, correct, partial or incorrect, and one or two sentences of feedback the learner will read. Then present the next prompt, going deeper where the attempt was weak, or finish with a short summary for the learner when the attempts show the goal is met. Your assessments are of the attempt in front of you, not of mastery. Prompts are rendered as Markdown with TeX math: write symbols and formulas between $…$ (or $$…$$ on their own line), never as bare underscores or braces.")
 
   (define coach/verbs
     (quote ((coach/present "Publish one activity to the learner and wait for their attempt. Answers (\"attempt\" the-attempt).")
-            (coach/present-from "Publish one activity grounded in a page you read, and wait for the attempt: the source id and page first, then the prompt and the answer you expect. The learner sees that page beside the prompt. Answers (\"attempt\" the-attempt).")
+            (coach/present-from "Publish one activity grounded in a page you read, and wait for the attempt: the source id, the page, and a passage quoted word for word from that page (a sentence or two the activity is about), then the prompt and the answer you expect. The learner sees that page beside the prompt with the passage marked. Answers (\"attempt\" the-attempt).")
             (coach/read "Read pages from..to (1-based, at most 4 at a time) of one of the learner's sources by its id. Answers (\"pages\" {resourceId title pageCount pages:[{page text}]}), or {found:false} for an id that is not theirs.")
             (coach/hint "Answer a hint request on the current activity: its activityRevisionId and one short hint that does not give the answer away. The learner reads it under the prompt; their attempt follows. Answers (\"attempt\" the-attempt).")
             (coach/assess "Record your assessment of an attempt: its attemptId, an outcome of correct, partial or incorrect, and feedback the learner reads. Answers (\"assessed\" the-attempt).")
@@ -35,13 +35,14 @@
             (learner/wait coach/path
               (learning/present coach/path "recall" prompt answer-key)))))
 
-  ;; The same, citing the page the activity comes from (21b): the learner
-  ;; reads that page inside the activity.
+  ;; The same, citing the page the activity comes from (21b) and the
+  ;; passage on it (#57): the learner reads that page inside the activity,
+  ;; the quoted passage marked.
   (define coach/present-from
-    (lambda (resource-id page prompt answer-key)
+    (lambda (resource-id page passage prompt answer-key)
       (list "attempt"
             (learner/wait coach/path
-              (learning/present coach/path "recall" prompt answer-key resource-id page)))))
+              (learning/present coach/path "recall" prompt answer-key resource-id page passage)))))
 
   ;; The assessment is a decision, and a decision is an effect: it goes
   ;; through the door to the application, which writes it as the attempt's

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Prompt } from "./prompt";
-import { SourcePassage } from "./source-passage";
+import { SourcePassage, type LoadImage } from "./source-passage";
 import { AnswerBox } from "./answer-box";
 import { AlertCircle, Check, Clock, Lightbulb, Loader2, RotateCcw, X as XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,8 @@ interface ActivityCardProps {
   onAccepted?: (receipt: AttemptReceipt) => void;
   /// Test seam for the cited page; the real card asks the backend.
   loadPage?: (resourceId: string, page: number) => Promise<string>;
+  /// Test seam for the drawn page; the real card fetches it.
+  loadImage?: LoadImage;
   /// Test seam for hints (20c); the real card asks the backend.
   hintClient?: { request: typeof requestHint; fetch: typeof fetchHints };
   deps?: { storage?: AttemptStorage; client?: AttemptClient };
@@ -27,10 +29,17 @@ const STATUS_LABEL: Record<AttemptStatus, string> = {
   pending: "Recorded, awaiting assessment",
 };
 
+/// The quoted passage of a cited page, when the coach gave one (#57).
+function passageOf(location: Revision["sourceLocation"]) {
+  if (typeof location?.quote !== "string") return undefined;
+  const at = (v: unknown) => (typeof v === "number" ? v : undefined);
+  return { quote: location.quote, start: at(location.start), end: at(location.end) };
+}
+
 /// One revision, answered through the backend (#13). What the learner sees
 /// is exactly one of: restoring, a draft to edit, submitting, the accepted
 /// receipt, or a failure with a retry that resends the same request key.
-export function ActivityCard({ revision, onAccepted, deps, loadPage, hintClient }: ActivityCardProps) {
+export function ActivityCard({ revision, onAccepted, deps, loadPage, loadImage, hintClient }: ActivityCardProps) {
   const { phase, draft, setDraft, submit: send } = useAttempt(revision.id, deps);
   const accepted = phase.kind === "accepted" ? phase.receipt : null;
   const locked = phase.kind === "restoring" || phase.kind === "submitting" || accepted !== null;
@@ -57,8 +66,10 @@ export function ActivityCard({ revision, onAccepted, deps, loadPage, hintClient 
             <SourcePassage
               resourceId={revision.sourceResourceId}
               page={revision.sourceLocation.page}
+              passage={passageOf(revision.sourceLocation)}
               openHref={sourceHref}
               loadPage={loadPage}
+              loadImage={loadImage}
             />
           ) : (
             sourceHref && (

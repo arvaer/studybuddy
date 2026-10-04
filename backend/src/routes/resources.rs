@@ -270,12 +270,19 @@ async fn get_file(
 /// page stays sharp on a high-density screen.
 const PAGE_IMAGE_WIDTH: u16 = 1600;
 
+#[derive(Deserialize)]
+struct PageImageQuery {
+    /// A passage quoted from the page, marked where it is found (#57).
+    highlight: Option<String>,
+}
+
 /// One page of an owned PDF as a PNG (`page` is 1-based), so an activity
 /// card shows the page as printed without fetching the whole file.
 async fn get_page_image(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path((id, page)): Path<(Uuid, usize)>,
+    Query(PageImageQuery { highlight }): Query<PageImageQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
     let not_found = || {
         HttpError(AppError::Domain(domain::errors::DomainError::NotFound(
@@ -291,20 +298,28 @@ async fn get_page_image(
     let bytes = tokio::fs::read(&file_path)
         .await
         .map_err(|e| HttpError(AppError::Unexpected(format!("read file: {e}"))))?;
-    let png = tokio::task::spawn_blocking(move || {
-        infra::pdf::render_page_png(&bytes, index, PAGE_IMAGE_WIDTH)
+    let image = tokio::task::spawn_blocking(move || {
+        infra::pdf::render_page_png(&bytes, index, PAGE_IMAGE_WIDTH, highlight.as_deref())
     })
     .await
     .map_err(|e| HttpError(AppError::Unexpected(format!("render page: {e}"))))?
     .ok_or_else(not_found)?;
-    Ok((
-        [
-            (axum::http::header::CONTENT_TYPE, "image/png"),
-            // A resource's file is a stored artifact version; it never changes.
-            (axum::http::header::CACHE_CONTROL, "private, max-age=86400"),
-        ],
-        png,
-    ))
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        "image/png".parse().unwrap(),
+    );
+    // A resource's file is a stored artifact version; it never changes.
+    headers.insert(
+        axum::http::header::CACHE_CONTROL,
+        "private, max-age=86400".parse().unwrap(),
+    );
+    // Where the marked passage starts, as a fraction of the picture's
+    // height, so the card can scroll it into view.
+    if let Some(top) = image.passage_top {
+        headers.insert("x-passage-top", format!("{top:.4}").parse().unwrap());
+    }
+    Ok((headers, image.png))
 }
 
 async fn delete_one(

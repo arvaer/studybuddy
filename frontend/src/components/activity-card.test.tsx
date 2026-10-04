@@ -228,13 +228,15 @@ describe("ActivityCard", () => {
     const c = client();
     const cited = { ...revision, id: "rev-c", sourceResourceId: "res-1", sourceLocation: { page: 58 } };
     const loadPage = vi.fn(async () => "The Markov property is best viewed as a restriction on the state.");
-    render(<ActivityCard revision={cited} deps={{ storage: memoryStorage(), client: c }} loadPage={loadPage} />);
+    const loadImage = vi.fn(async () => ({ src: "page-58.png" }));
+    render(<ActivityCard revision={cited} deps={{ storage: memoryStorage(), client: c }} loadPage={loadPage} loadImage={loadImage} />);
     expect(screen.getByText(/Source · p\. 58/)).toBeTruthy();
     await waitFor(() => expect(screen.getByText(/restriction on the state/)).toBeTruthy());
     expect(loadPage).toHaveBeenCalledWith("res-1", 58);
+    expect(loadImage).toHaveBeenCalledWith("res-1", 58, undefined);
     // Once the drawn page arrives it replaces the text; the text stays a click away.
-    const img = screen.getByAltText("Page 58 of the source") as HTMLImageElement;
-    expect(img.getAttribute("src")).toBe("/api/resources/res-1/pages/58/image");
+    const img = await screen.findByAltText("Page 58 of the source");
+    expect(img.getAttribute("src")).toBe("page-58.png");
     fireEvent.load(img);
     expect(screen.queryByText(/restriction on the state/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "text" }));
@@ -242,6 +244,24 @@ describe("ActivityCard", () => {
     // An uncited revision shows no passage.
     const { container } = render(<ActivityCard revision={{ ...revision, id: "rev-u" }} deps={{ storage: memoryStorage(), client: c }} />);
     expect(container.querySelector("[data-testid=source-passage]")).toBeNull();
+  });
+
+  it("marks the quoted passage on the drawn page and in the text", async () => {
+    const page = "Intro. The Markov property is a restriction on the state, not the process.";
+    const quote = "The Markov property is a restriction on the state";
+    const cited = {
+      ...revision, id: "rev-p", options: null, hasAnswerKey: false, sourceResourceId: "res-1",
+      sourceLocation: { page: 58, quote, start: 7, end: 7 + quote.length },
+    };
+    const loadImage = vi.fn(async () => ({ src: "page-58.png", passageTop: 0.8 }));
+    render(<ActivityCard revision={cited} deps={{ storage: memoryStorage(), client: client() }} loadPage={async () => page} loadImage={loadImage} />);
+    expect(loadImage).toHaveBeenCalledWith("res-1", 58, quote);
+    await waitFor(() => expect(screen.getByText(quote).tagName).toBe("MARK"));
+    // The drawn page scrolls so the marked passage is in view.
+    const img = await screen.findByAltText("Page 58 of the source");
+    Object.defineProperty(img, "clientHeight", { value: 1000 });
+    fireEvent.load(img);
+    expect(img.parentElement!.scrollTop).toBe(800 - 48);
   });
 
   it("asks the coach for a hint, shows it, and records it as assistance", async () => {
