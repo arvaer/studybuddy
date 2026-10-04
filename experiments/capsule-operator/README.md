@@ -2,7 +2,7 @@
 
 First review slice for the [operator integration](../../docs/capsule-integration.md). This standalone crate does not change StudyBuddy's backend workspace or frontend. It exercises real Capsule execution with scripted model replies and in-memory publication receipts. There is no model API, database, network provider, grading, or rendered UI.
 
-Core is pinned to `4b77dcce4de6efd8d81b0c671a33851ce353918a`. Use Rust 1.97.0. From the StudyBuddy repository:
+Core is pinned to `7ad7c4bfe36b45667a77f222c2a1772ad0a0ae60`. Use Rust 1.97.0. From the StudyBuddy repository:
 
 ```sh
 cargo +1.97.0 fmt --manifest-path experiments/capsule-operator/Cargo.toml --check
