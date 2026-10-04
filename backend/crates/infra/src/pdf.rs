@@ -74,7 +74,7 @@ pub fn render_page_png(
     index: usize,
     width: u16,
     highlight: Option<&str>,
-) -> Option<Vec<u8>> {
+) -> Option<PageImage> {
     let pdfium = pdfium()?;
     let document = pdfium.load_pdf_from_byte_slice(bytes, None).ok()?;
     let page = document.pages().get(i32::try_from(index).ok()?).ok()?;
@@ -82,12 +82,16 @@ pub fn render_page_png(
     let bitmap = page.render_with_config(&config).ok()?;
     let (w, h) = (bitmap.width() as usize, bitmap.height() as usize);
     let mut rgba = bitmap.as_rgba_bytes();
-    if let Some(quote) = highlight {
-        for (x0, y0, x1, y1) in passage_boxes(&page, &config, quote) {
-            mark(&mut rgba, w, h, (x0, y0, x1, y1));
-        }
+    let bands = highlight.map_or_else(Vec::new, |quote| {
+        lines(passage_boxes(&page, &config, quote))
+    });
+    for band in &bands {
+        mark(&mut rgba, w, h, *band);
     }
     let (x0, y0, x1, y1) = ink_bounds(&rgba, w, h);
+    let passage_top = bands
+        .first()
+        .map(|b| (b.1.max(y0 as i32) - y0 as i32) as f32 / (y1 - y0) as f32);
     // Pages are opaque; RGB is a quarter smaller than RGBA.
     let mut rgb = Vec::with_capacity((x1 - x0) * (y1 - y0) * 3);
     for y in y0..y1 {
@@ -100,7 +104,17 @@ pub fn render_page_png(
     encoder.set_color(png::ColorType::Rgb);
     encoder.set_compression(png::Compression::Balanced);
     encoder.write_header().ok()?.write_image_data(&rgb).ok()?;
-    Some(out)
+    Some(PageImage {
+        png: out,
+        passage_top,
+    })
+}
+
+/// A drawn page, and where on it the marked passage starts: a fraction of
+/// the picture's height, so the card can scroll it into view.
+pub struct PageImage {
+    pub png: Vec<u8>,
+    pub passage_top: Option<f32>,
 }
 
 /// Pixel boxes of the characters of `quote` on `page`, found the way the
@@ -129,7 +143,13 @@ fn passage_boxes(
     };
     (start..end)
         .filter_map(|i| {
-            let rect = chars.get(i).ok()?.loose_bounds().ok()?;
+            let ch = chars.get(i).ok()?;
+            // Spaces and line ends carry degenerate boxes that would split
+            // a line's band; the band spans the gaps between words anyway.
+            if ch.unicode_char().is_none_or(char::is_whitespace) {
+                return None;
+            }
+            let rect = ch.loose_bounds().ok()?;
             let (x0, y0) = page
                 .points_to_pixels(rect.left(), rect.top(), config)
                 .ok()?;
@@ -139,6 +159,22 @@ fn passage_boxes(
             Some((x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1)))
         })
         .collect()
+}
+
+/// Character boxes, in reading order, joined into one band per line, so the
+/// gaps between words are marked too.
+fn lines(boxes: Vec<(i32, i32, i32, i32)>) -> Vec<(i32, i32, i32, i32)> {
+    let mut out: Vec<(i32, i32, i32, i32)> = Vec::new();
+    for b in boxes {
+        match out.last_mut() {
+            // Same line: the vertical extents overlap by more than half.
+            Some(l) if (l.3.min(b.3) - l.1.max(b.1)) * 2 > (b.3 - b.1).min(l.3 - l.1) => {
+                *l = (l.0.min(b.0), l.1.min(b.1), l.2.max(b.2), l.3.max(b.3));
+            }
+            _ => out.push(b),
+        }
+    }
+    out
 }
 
 /// Tint a box the way a highlighter does: multiply by yellow, so the ink
@@ -204,7 +240,9 @@ mod tests {
             eprintln!("skipped: PDFium not found (scripts/fetch-pdfium.sh)");
             return;
         }
-        let png = render_page_png(HELLO, 0, 400, None).expect("page 1 renders");
+        let png = render_page_png(HELLO, 0, 400, None)
+            .expect("page 1 renders")
+            .png;
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
         // IHDR width and height, right after the signature and chunk header:
         // the one line of text keeps some width, the blank page below it goes.
@@ -220,6 +258,14 @@ mod tests {
     }
 
     #[test]
+    fn character_boxes_join_into_one_band_per_line() {
+        let line1 = [(10, 100, 18, 112), (22, 98, 30, 112), (34, 101, 40, 112)];
+        let line2 = [(10, 120, 18, 132), (22, 121, 28, 132)];
+        let joined = lines(line1.iter().chain(&line2).copied().collect());
+        assert_eq!(joined, vec![(10, 98, 40, 112), (10, 120, 28, 132)]);
+    }
+
+    #[test]
     fn a_quoted_passage_is_marked_and_an_absent_one_is_not() {
         if !available() {
             eprintln!("skipped: PDFium not found (scripts/fetch-pdfium.sh)");
@@ -228,8 +274,11 @@ mod tests {
         let plain = render_page_png(HELLO, 0, 400, None).unwrap();
         let marked = render_page_png(HELLO, 0, 400, Some("Hello from StudyBuddy")).unwrap();
         let absent = render_page_png(HELLO, 0, 400, Some("a sentence not on the page")).unwrap();
-        assert_ne!(plain, marked, "the passage changes the picture");
-        assert_eq!(plain, absent, "a quote not found draws nothing");
+        assert_ne!(plain.png, marked.png, "the passage changes the picture");
+        let top = marked.passage_top.expect("a found passage has a place");
+        assert!((0.0..1.0).contains(&top), "{top}");
+        assert_eq!(plain.png, absent.png, "a quote not found draws nothing");
+        assert_eq!(absent.passage_top, None);
     }
 
     #[test]
