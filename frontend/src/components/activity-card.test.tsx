@@ -4,6 +4,7 @@ import { ActivityCard } from "./activity-card";
 import { ApiError } from "@/lib/api";
 import type { AttemptReceipt, Revision } from "@/lib/activities";
 import { memoryStorage, type AttemptClient } from "@/lib/attempt-state";
+import { EditorView } from "@codemirror/view";
 
 const revision: Revision = {
   id: "rev-1",
@@ -31,6 +32,13 @@ function client(over: Partial<AttemptClient> = {}): AttemptClient {
   };
 }
 
+/// Replace the answer editor's text, cursor at the end, as typing would.
+function typeAnswer(text: string): EditorView {
+  const view = EditorView.findFromDOM(screen.getByLabelText("Your answer"))!;
+  act(() => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, selection: { anchor: text.length } }));
+  return view;
+}
+
 const phaseOf = () => screen.getByText(revision.prompt).closest("[data-phase]")!.getAttribute("data-phase");
 
 describe("ActivityCard", () => {
@@ -54,7 +62,7 @@ describe("ActivityCard", () => {
     render(<ActivityCard revision={{ ...revision, options: null, hasAnswerKey: false }} deps={{ storage: memoryStorage(), client: c }} />);
     await waitFor(() => expect(phaseOf()).toBe("draft"));
 
-    fireEvent.change(screen.getByLabelText("Your answer"), { target: { value: "It bootstraps from the action actually taken." } });
+    typeAnswer("It bootstraps from the action actually taken.");
     fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
 
     await waitFor(() => expect(phaseOf()).toBe("accepted"));
@@ -140,23 +148,23 @@ describe("ActivityCard", () => {
     expect(container.textContent).not.toContain("$");
   });
 
-  it("previews a formatted draft and shows the accepted answer rendered", async () => {
-    const answer = "It is $v_\\pi(s)$.";
+  it("draws math in the answer as it is typed, and shows source where the cursor is", async () => {
+    const answer = "It is $v_\\pi(s)$ here.";
     const c = client({ record: vi.fn(async () => ({ receipt: { ...receipt("pending"), response: answer }, replayed: false })) });
     render(<ActivityCard revision={{ ...revision, options: null, hasAnswerKey: false }} deps={{ storage: memoryStorage(), client: c }} />);
     await waitFor(() => expect(phaseOf()).toBe("draft"));
-    const box = screen.getByLabelText("Your answer");
-    fireEvent.change(box, { target: { value: "plain words" } });
-    expect(screen.queryByTestId("answer-preview")).toBeNull();
-    fireEvent.change(box, { target: { value: answer } });
-    expect(screen.getByTestId("answer-preview").querySelector(".katex")).toBeTruthy();
-    // A line that is only $$…$$ is display math, not inline.
-    fireEvent.change(box, { target: { value: "so\n\n$$v = 1$$" } });
-    expect(screen.getByTestId("answer-preview").querySelector(".katex-display")).toBeTruthy();
-    fireEvent.change(box, { target: { value: answer } });
+    const editor = typeAnswer(answer);
+    expect(editor.dom.querySelector(".cm-math .katex")).toBeTruthy();
+    act(() => editor.dispatch({ selection: { anchor: answer.indexOf("v_") } }));
+    expect(editor.dom.querySelector(".cm-math")).toBeNull();
+    // A line that is only $$…$$ is display math.
+    typeAnswer("so\n$$v = 1$$\nok");
+    expect(editor.dom.querySelector(".cm-math-display")).toBeTruthy();
 
+    typeAnswer(answer);
     fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
     await waitFor(() => expect(phaseOf()).toBe("accepted"));
+    expect(c.record).toHaveBeenCalledWith(expect.objectContaining({ response: answer }));
     expect(screen.getByTestId("accepted-answer").querySelector(".katex")).toBeTruthy();
     expect(screen.queryByLabelText("Your answer")).toBeNull();
   });
@@ -164,15 +172,12 @@ describe("ActivityCard", () => {
   it("indents with Tab inside a code fence and leaves Tab alone outside one", async () => {
     render(<ActivityCard revision={{ ...revision, options: null, hasAnswerKey: false }} deps={{ storage: memoryStorage(), client: client() }} />);
     await waitFor(() => expect(phaseOf()).toBe("draft"));
-    const box = screen.getByLabelText("Your answer") as HTMLTextAreaElement;
-    fireEvent.change(box, { target: { value: "plain" } });
-    box.setSelectionRange(5, 5);
-    expect(fireEvent.keyDown(box, { key: "Tab" })).toBe(true);
+    const editor = typeAnswer("plain");
+    expect(fireEvent.keyDown(editor.contentDOM, { key: "Tab" })).toBe(true);
     const fenced = "```python\ndef f():\n";
-    fireEvent.change(box, { target: { value: fenced } });
-    box.setSelectionRange(fenced.length, fenced.length);
-    expect(fireEvent.keyDown(box, { key: "Tab" })).toBe(false);
-    expect(box.value).toBe(fenced + "    ");
+    typeAnswer(fenced);
+    expect(fireEvent.keyDown(editor.contentDOM, { key: "Tab" })).toBe(false);
+    expect(editor.state.doc.toString()).toBe(fenced + "    ");
   });
 
   it("shows the cited page of the source under the prompt", async () => {
@@ -208,7 +213,7 @@ describe("ActivityCard", () => {
       const free = { ...revision, id: "rev-h", options: null, hasAnswerKey: false };
       render(<ActivityCard revision={free} deps={{ storage: memoryStorage(), client: c }} hintClient={hintClient} />);
       await act(async () => { await Promise.resolve(); });
-      fireEvent.change(screen.getByRole("textbox"), { target: { value: "the sum of" } });
+      typeAnswer("the sum of");
       await act(async () => { fireEvent.click(screen.getByRole("button", { name: /hint/i })); });
       expect(hintClient.request).toHaveBeenCalledWith("rev-h", "the sum of");
       await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
