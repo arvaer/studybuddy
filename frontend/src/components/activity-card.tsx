@@ -1,13 +1,13 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Prompt } from "./prompt";
 import { SourcePassage } from "./source-passage";
-import { AlertCircle, Check, Clock, Loader2, RotateCcw, X as XIcon } from "lucide-react";
+import { AlertCircle, Check, Clock, Lightbulb, Loader2, RotateCcw, X as XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useAttempt } from "@/hooks/use-attempt";
-import type { Revision, AttemptStatus, AttemptReceipt } from "@/lib/activities";
+import { fetchHints, requestHint, type Hint, type Revision, type AttemptStatus, type AttemptReceipt } from "@/lib/activities";
 import type { AttemptClient, AttemptStorage } from "@/lib/attempt-state";
 
 interface ActivityCardProps {
@@ -15,6 +15,8 @@ interface ActivityCardProps {
   onAccepted?: (receipt: AttemptReceipt) => void;
   /// Test seam for the cited page; the real card asks the backend.
   loadPage?: (resourceId: string, page: number) => Promise<string>;
+  /// Test seam for hints (20c); the real card asks the backend.
+  hintClient?: { request: typeof requestHint; fetch: typeof fetchHints };
   deps?: { storage?: AttemptStorage; client?: AttemptClient };
 }
 
@@ -28,10 +30,13 @@ const STATUS_LABEL: Record<AttemptStatus, string> = {
 /// One revision, answered through the backend (#13). What the learner sees
 /// is exactly one of: restoring, a draft to edit, submitting, the accepted
 /// receipt, or a failure with a retry that resends the same request key.
-export function ActivityCard({ revision, onAccepted, deps, loadPage }: ActivityCardProps) {
-  const { phase, draft, setDraft, submit } = useAttempt(revision.id, deps);
+export function ActivityCard({ revision, onAccepted, deps, loadPage, hintClient }: ActivityCardProps) {
+  const { phase, draft, setDraft, submit: send } = useAttempt(revision.id, deps);
   const accepted = phase.kind === "accepted" ? phase.receipt : null;
   const locked = phase.kind === "restoring" || phase.kind === "submitting" || accepted !== null;
+  const hints = useHints(revision.id, hintClient);
+  // The hints shown are the assistance the attempt records (20c).
+  const submit = () => send(hints.given.map((h) => ({ kind: "hint", text: h.text })));
   // What to show as the answer: the accepted submission once there is one,
   // else the local draft.
   const shown = accepted ? (typeof accepted.response === "string" ? accepted.response : JSON.stringify(accepted.response)) : draft;
@@ -44,6 +49,17 @@ export function ActivityCard({ revision, onAccepted, deps, loadPage }: ActivityC
 
       {revision.sourceResourceId && typeof revision.sourceLocation?.page === "number" && (
         <SourcePassage resourceId={revision.sourceResourceId} page={revision.sourceLocation.page} loadPage={loadPage} />
+      )}
+
+      {hints.given.length > 0 && (
+        <ul className="mb-6 space-y-2" data-testid="hints">
+          {hints.given.map((hint, i) => (
+            <li key={hint.id} className="flex gap-2 text-sm text-foreground/90 rounded-md border border-accent/40 bg-accent/5 px-3 py-2">
+              <Lightbulb className="h-4 w-4 mt-0.5 shrink-0 text-accent" />
+              <div><span className="text-muted-foreground mr-1">Hint {i + 1}.</span><Prompt>{hint.text}</Prompt></div>
+            </li>
+          ))}
+        </ul>
       )}
 
       {revision.options ? (
@@ -137,9 +153,20 @@ export function ActivityCard({ revision, onAccepted, deps, loadPage }: ActivityC
           </Button>
         ) : (
           !accepted && (
-            <Button onClick={submit} disabled={locked || !draft}>
-              Submit answer
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => hints.ask(draft)}
+                disabled={locked || hints.waiting}
+                aria-label="Ask for a hint"
+              >
+                {hints.waiting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Lightbulb className="h-4 w-4 mr-2" />}
+                {hints.waiting ? "Asking the coach…" : "Hint"}
+              </Button>
+              <Button onClick={submit} disabled={locked || !draft}>
+                Submit answer
+              </Button>
+            </div>
           )
         )}
       </div>
@@ -155,4 +182,56 @@ function AcceptedOnce({ receipt, onAccepted }: { receipt: AttemptReceipt; onAcce
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return null;
+}
+
+/// The hints the operator has given on this revision, and asking for one
+/// more: the request is posted, then the list is polled until it grows
+/// (the coach answers in a few seconds) or a minute passes.
+function useHints(revisionId: string, client?: ActivityCardProps["hintClient"]) {
+  const request = client?.request ?? requestHint;
+  const fetch = client?.fetch ?? fetchHints;
+  const [given, setGiven] = useState<Hint[]>([]);
+  const [waiting, setWaiting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setGiven([]);
+    setWaiting(false);
+    fetch(revisionId).then((h) => { if (!cancelled) setGiven(h); }).catch(() => { /* none yet */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revisionId]);
+
+  useEffect(() => {
+    if (!waiting) return;
+    const before = given.length;
+    let tries = 0;
+    const timer = setInterval(() => {
+      tries += 1;
+      fetch(revisionId)
+        .then((h) => {
+          if (h.length > before) {
+            setGiven(h);
+            setWaiting(false);
+          } else if (tries >= 30) {
+            setWaiting(false);
+          }
+        })
+        .catch(() => { /* next tick */ });
+    }, 2000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waiting, revisionId]);
+
+  const ask = async (draft: string) => {
+    if (waiting) return;
+    setWaiting(true);
+    try {
+      await request(revisionId, draft);
+    } catch {
+      setWaiting(false);
+    }
+  };
+
+  return { given, waiting, ask };
 }

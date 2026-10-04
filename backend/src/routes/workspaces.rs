@@ -197,12 +197,26 @@ mod tests {
     const ASSESS: &str =
         r#"(coach/assess "{{attempt}}" "correct" "Yes: each reward is discounted by its delay.")"#;
 
+    /// `{{revision}}` is the activityRevisionId of the hint request in the
+    /// latest turn.
+    const HINT: &str = r#"(coach/hint "{{revision}}" "Think about what the discount does to a reward that is far away.")"#;
+
     /// The attemptId in the newest turn's result, if the newest turn
     /// answered an attempt.
     fn latest_attempt(effect: &Effect) -> Option<String> {
         let turns = effect.payload().first()?.get(4)?.as_array()?;
         let newest = turns.first()?;
         newest[1][0][1]["attemptId"].as_str().map(str::to_string)
+    }
+
+    /// The activityRevisionId in the newest turn's result (an attempt or a
+    /// hint request).
+    fn latest_revision(effect: &Effect) -> Option<String> {
+        let turns = effect.payload().first()?.get(4)?.as_array()?;
+        let newest = turns.first()?;
+        newest[1][0][1]["activityRevisionId"]
+            .as_str()
+            .map(str::to_string)
     }
 
     type Calls = Arc<Mutex<Vec<Effect>>>;
@@ -240,10 +254,13 @@ mod tests {
                             return Reply::Declined("the script is over".into());
                         }
                         let form = forms.remove(0);
-                        let form = match latest_attempt(effect) {
-                            Some(id) => form.replace("{{attempt}}", &id),
-                            None => form.to_string(),
-                        };
+                        let mut form = form.to_string();
+                        if let Some(id) = latest_attempt(effect) {
+                            form = form.replace("{{attempt}}", &id);
+                        }
+                        if let Some(id) = latest_revision(effect) {
+                            form = form.replace("{{revision}}", &id);
+                        }
                         Reply::Value(json!({ "form": form }))
                     }),
                 );
@@ -1024,6 +1041,118 @@ mod tests {
             (2, 0),
             "delivered once, with the receipt"
         );
+        runtime.close(ws.parse().unwrap()).await.unwrap();
+    }
+
+    /// A hint (20c): the learner asks, the coach is woken through its wait
+    /// and answers with coach/hint, the hint is readable under the prompt,
+    /// the activity is still the one waiting, and the attempt that follows
+    /// is assessed as usual.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn a_hint_request_wakes_the_coach_and_the_hint_lands_under_the_prompt(pool: PgPool) {
+        let models = Calls::default();
+        let (app, runtime) = serve(
+            &pool,
+            scripted(models.clone(), vec![FIRST, HINT, ASSESS, FOLLOW_UP]),
+        )
+        .await;
+        let user = learner(&pool, "j@x.test").await;
+        let (_, current) = call(&app, "GET", "/api/workspaces/current", user, None).await;
+        let ws = current["id"].as_str().unwrap().to_string();
+        call(
+            &app,
+            "POST",
+            &format!("/api/workspaces/{ws}/goal"),
+            user,
+            Some(json!({ "intent": "Returns." })),
+        )
+        .await;
+        let first = settled(&app, user, &ws).await;
+        let activity = first["currentActivityId"].as_str().unwrap().to_string();
+        let revision = revision_of(&pool, &activity).await;
+
+        let (status, body) = call(
+            &app,
+            "POST",
+            &format!("/api/attempts/drafts/{revision}/hint"),
+            user,
+            Some(json!({ "draft": "something about rewards?" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        let hinted = settled(&app, user, &ws).await;
+        assert_eq!(hinted["operator"], "waiting", "{hinted}");
+        assert_eq!(
+            hinted["currentActivityId"], activity,
+            "the same activity waits"
+        );
+        let (_, hints) = call(
+            &app,
+            "GET",
+            &format!("/api/attempts/drafts/{revision}/hint"),
+            user,
+            None,
+        )
+        .await;
+        assert_eq!(hints["hints"].as_array().map(Vec::len), Some(1), "{hints}");
+        assert!(hints["hints"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("far away"));
+        {
+            let models = models.lock().unwrap();
+            assert_eq!(models.len(), 2, "present, then the hint");
+            let asked = &models[1].payload()[0][4][0][1][0][1];
+            assert_eq!(asked["hintRequested"], true, "{asked}");
+            assert_eq!(asked["draft"], "something about rewards?");
+        }
+        // Another learner can neither ask on nor read this revision.
+        let other = learner(&pool, "k@x.test").await;
+        let (status, _) = call(
+            &app,
+            "POST",
+            &format!("/api/attempts/drafts/{revision}/hint"),
+            other,
+            Some(json!({})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (_, theirs) = call(
+            &app,
+            "GET",
+            &format!("/api/attempts/drafts/{revision}/hint"),
+            other,
+            None,
+        )
+        .await;
+        assert_eq!(theirs["hints"].as_array().map(Vec::len), Some(0));
+
+        // The attempt, with the hint as assistance, answers the second wait.
+        let (status, receipt) = call(
+            &app,
+            "POST",
+            "/api/attempts",
+            user,
+            Some(json!({
+                "requestKey": "k1", "activityRevisionId": revision,
+                "response": "the discounted sum of future rewards",
+                "assistance": [{ "kind": "hint", "text": hints["hints"][0]["text"] }]
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{receipt}");
+        let next = settled(&app, user, &ws).await;
+        assert_eq!(next["operator"], "waiting", "{next}");
+        assert_ne!(next["currentActivityId"], activity);
+        let (_, judged) = call(
+            &app,
+            "GET",
+            &format!("/api/attempts/{}", receipt["attemptId"].as_str().unwrap()),
+            user,
+            None,
+        )
+        .await;
+        assert_eq!(judged["status"], "correct", "{judged}");
         runtime.close(ws.parse().unwrap()).await.unwrap();
     }
 }

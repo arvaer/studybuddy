@@ -115,6 +115,7 @@ export async function submit(
   response: string,
   storage: AttemptStorage,
   client: AttemptClient,
+  assistance: unknown[] = [],
 ): Promise<AttemptPhase> {
   const stored = storage.load(revisionId);
   const requestKey =
@@ -128,7 +129,7 @@ export async function submit(
       requestKey,
       activityRevisionId: revisionId,
       response,
-      assistance: [],
+      assistance,
     });
     storage.save(revisionId, { attemptId: receipt.attemptId });
     return { kind: "accepted", receipt, replayed };

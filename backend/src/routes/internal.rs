@@ -25,7 +25,9 @@
 //! a value saying so rather than a refusal, so a slip by the model does not
 //! end the run. A third, `source/read` at `source.read` (21a), is a
 //! read-only look at pages of the learner's own sources: no receipt, a
-//! page cap, and `{"found": false}` for an id that is not theirs.
+//! page cap, and `{"found": false}` for an id that is not theirs. A fourth,
+//! `learning/hint` at `learning.hint` (20c), writes one hint on an activity
+//! revision and answers the activity with the hint beside it.
 
 use axum::{
     body::Bytes,
@@ -60,6 +62,8 @@ const ASSESS_PATH: &str = "learning.assess";
 const ASSESS_FAMILY: &str = "learning/assess";
 const SOURCE_PATH: &str = "source.read";
 const SOURCE_FAMILY: &str = "source/read";
+const HINT_PATH: &str = "learning.hint";
+const HINT_FAMILY: &str = "learning/hint";
 /// The most pages one read answers, and the most characters of each.
 const READ_MAX_PAGES: usize = 4;
 const READ_MAX_CHARS: usize = 4000;
@@ -146,6 +150,7 @@ async fn effect(
         PRESENT_PATH => PRESENT_FAMILY,
         ASSESS_PATH => ASSESS_FAMILY,
         SOURCE_PATH => SOURCE_FAMILY,
+        HINT_PATH => HINT_FAMILY,
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     let req: EffectRequest = match serde_json::from_slice(&body) {
@@ -180,6 +185,7 @@ async fn effect(
     let served = match served {
         PRESENT_FAMILY => present(&state, workspace, owner, &req).await,
         ASSESS_FAMILY => assess(&state, workspace, owner, &req).await,
+        HINT_FAMILY => hint(&state, workspace, owner, &req).await,
         _ => read(&state, workspace, owner, &req).await,
     };
     match served {
@@ -298,6 +304,86 @@ async fn read(
         "to": to,
         "pages": read,
     })))
+}
+
+/// `[path, revision-id, text]` (`coach/hint`, 20c): one hint on one of the
+/// learner's activity revisions, on one transaction with its receipt. The
+/// reply is the activity as `learning/present` answers it, with `hint`
+/// beside it, so the wait the capsule applies to it is a new effect that
+/// the runtime reads like any other wait. A revision that is not this
+/// learner's is refused: the coach was handed the id with the attempt.
+async fn hint(
+    state: &AppState,
+    workspace: Uuid,
+    owner: Uuid,
+    req: &EffectRequest,
+) -> Result<Response, Response> {
+    let [path, revision, text] = req.payload.as_slice() else {
+        return Err(refused(format!(
+            "{HINT_FAMILY} takes [path revision-id text]"
+        )));
+    };
+    scoped_path(workspace, path)?;
+    let Some(revision) = revision.as_str().and_then(|r| r.parse::<Uuid>().ok()) else {
+        return Err(refused("revision-id must be an activity revision id"));
+    };
+    let Some(text) = text.as_str().filter(|t| !t.trim().is_empty()) else {
+        return Err(refused("the hint must be text"));
+    };
+    let mut tx = state.pool.begin().await.map_err(database)?;
+    if let Some(receipt) = receipts::find(&mut *tx, workspace, &req.id)
+        .await
+        .map_err(database)?
+    {
+        return Ok(value(receipt.payload));
+    }
+    let activity: Option<Uuid> = sqlx::query_scalar(
+        "SELECT a.id FROM activity_revisions r JOIN activities a ON a.id = r.activity_id
+         WHERE r.id = $1 AND a.user_id = $2",
+    )
+    .bind(revision)
+    .bind(owner)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(database)?;
+    let Some(activity) = activity else {
+        return Err(refused(format!(
+            "no activity revision {revision} for this learner"
+        )));
+    };
+    let hint_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO hints (activity_revision_id, text) VALUES ($1, $2) RETURNING id",
+    )
+    .bind(revision)
+    .bind(text)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(database)?;
+    let published = ActivityService::new(PgActivityRepository::new(state.pool.clone()))
+        .get(owner, activity)
+        .await
+        .map_err(application)?;
+    let mut payload = serde_json::to_value(&published).map_err(|e| {
+        tracing::error!("effect endpoint could not encode the reply: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR.into_response()
+    })?;
+    payload["hint"] = json!({ "id": hint_id, "text": text });
+    let receipt = Receipt {
+        effect_id: req.id.clone(),
+        workspace_id: workspace,
+        family: HINT_FAMILY.to_string(),
+        payload,
+    };
+    match receipts::record(&mut tx, &receipt)
+        .await
+        .map_err(database)?
+    {
+        Recorded::New => {
+            tx.commit().await.map_err(database)?;
+            Ok(value(receipt.payload))
+        }
+        Recorded::Existing(earlier) => Ok(value(earlier.payload)),
+    }
 }
 
 /// The operator's assessment of an attempt, on one transaction with its

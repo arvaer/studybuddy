@@ -66,6 +66,7 @@ pub type Installer = Arc<dyn Fn(&mut Session<Record>, &Wakes) + Send + Sync>;
 const PRESENT_FAMILY: &str = "learning/present";
 const ASSESS_FAMILY: &str = "learning/assess";
 const SOURCE_FAMILY: &str = "source/read";
+const HINT_FAMILY: &str = "learning/hint";
 /// How long a dead process keeps a workspace from its successor. Renewed
 /// every `LEASE_RENEWAL` by a live one; short, because every backend
 /// restart during a session is exactly this wait (20e).
@@ -154,7 +155,7 @@ impl OperatorRuntime {
         let wakes = Wakes::new(workspace, self.wakes.clone());
         let install: Install = Box::new(move |session: &mut Session<Record>| {
             installer(session, &wakes);
-            for family in [PRESENT_FAMILY, ASSESS_FAMILY, SOURCE_FAMILY] {
+            for family in [PRESENT_FAMILY, ASSESS_FAMILY, SOURCE_FAMILY, HINT_FAMILY] {
                 session.provide(
                     family,
                     operator::providers::effect_client(
@@ -290,20 +291,52 @@ impl OperatorRuntime {
                 continue;
             };
             let owner = workspaces.owner(workspace).await.map_err(repository)?;
-            let Some(attempt) = workspaces
+            let attempt = workspaces
                 .first_attempt(owner, revision)
                 .await
-                .map_err(repository)?
-            else {
-                continue;
-            };
-            let receipt = AttemptService::new(PgAttemptRepository::new(self.pool.clone()))
-                .get(owner, attempt)
-                .await
-                .map_err(|e| repository(domain::errors::DomainError::Repository(e.to_string())))?;
-            let mut payload = serde_json::to_value(&receipt)
-                .map_err(|e| repository(domain::errors::DomainError::Repository(e.to_string())))?;
+                .map_err(repository)?;
             let mut tx = self.pool.begin().await?;
+            // What answers the wait: the attempt, or, while there is none,
+            // a hint request (20c), served now so it answers once.
+            let (mut payload, what) = match attempt {
+                Some(attempt) => {
+                    let receipt = AttemptService::new(PgAttemptRepository::new(self.pool.clone()))
+                        .get(owner, attempt)
+                        .await
+                        .map_err(|e| {
+                            repository(domain::errors::DomainError::Repository(e.to_string()))
+                        })?;
+                    let payload = serde_json::to_value(&receipt).map_err(|e| {
+                        repository(domain::errors::DomainError::Repository(e.to_string()))
+                    })?;
+                    (payload, format!("attempt {attempt}"))
+                }
+                None => {
+                    let asked: Option<(Uuid, String)> = sqlx::query_as(
+                        "UPDATE hint_requests SET served_at = now()
+                         WHERE id = (SELECT id FROM hint_requests
+                                     WHERE activity_revision_id = $1 AND workspace_id = $2 AND served_at IS NULL
+                                     ORDER BY requested_at LIMIT 1)
+                         RETURNING id, draft",
+                    )
+                    .bind(revision)
+                    .bind(workspace)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                    let Some((request, draft)) = asked else {
+                        tx.rollback().await?;
+                        continue;
+                    };
+                    (
+                        json!({
+                            "hintRequested": true,
+                            "activityRevisionId": revision,
+                            "draft": draft,
+                        }),
+                        format!("hint request {request}"),
+                    )
+                }
+            };
             // What the learner read since the coach's last turn (21c),
             // delivered with this receipt and marked so in the same
             // transaction, so each stay reaches the coach once.
@@ -340,7 +373,7 @@ impl OperatorRuntime {
             .await?;
             tx.commit().await?;
             if let Recorded::New = recorded {
-                tracing::info!(workspace = %workspace, effect = park.digest(), attempt = %attempt, "attempt receipted for the operator's wait");
+                tracing::info!(workspace = %workspace, effect = park.digest(), %what, "the operator's wait is answered");
             }
             owed.push(park);
         }

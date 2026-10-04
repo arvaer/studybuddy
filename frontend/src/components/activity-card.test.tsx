@@ -152,4 +152,33 @@ describe("ActivityCard", () => {
     const { container } = render(<ActivityCard revision={{ ...revision, id: "rev-u" }} deps={{ storage: memoryStorage(), client: c }} />);
     expect(container.querySelector("[data-testid=source-passage]")).toBeNull();
   });
+
+  it("asks the coach for a hint, shows it, and records it as assistance", async () => {
+    vi.useFakeTimers();
+    try {
+      const c = client();
+      const hint = { id: "h1", text: "Think about what the discount does.", createdAt: "2026-10-03T00:00:00Z" };
+      let hints: typeof hint[] = [];
+      const hintClient = {
+        request: vi.fn(async () => { hints = [hint]; }),
+        fetch: vi.fn(async () => hints),
+      };
+      const free = { ...revision, id: "rev-h", options: null, hasAnswerKey: false };
+      render(<ActivityCard revision={free} deps={{ storage: memoryStorage(), client: c }} hintClient={hintClient} />);
+      await act(async () => { await Promise.resolve(); });
+      fireEvent.change(screen.getByRole("textbox"), { target: { value: "the sum of" } });
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: /hint/i })); });
+      expect(hintClient.request).toHaveBeenCalledWith("rev-h", "the sum of");
+      await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+      expect(screen.getByText(/Think about what the discount does/)).toBeTruthy();
+      await act(async () => { fireEvent.click(screen.getByText("Submit answer")); });
+      await act(async () => { await Promise.resolve(); });
+      expect(c.record).toHaveBeenCalledWith(expect.objectContaining({
+        response: "the sum of",
+        assistance: [{ kind: "hint", text: hint.text }],
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
