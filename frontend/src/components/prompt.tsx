@@ -8,6 +8,12 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 
+/// remark-math only treats `$$` as display math when it sits on its own
+/// line; a line that is nothing but `$$…$$` is meant as display too.
+function displayMath(text: string): string {
+  return text.replace(/^[ \t]*\$\$([^\n]+?)\$\$[ \t]*$/gm, "$$$$\n$1\n$$$$");
+}
+
 export function Prompt({ children }: { children: string }) {
   return (
     <ReactMarkdown
@@ -20,10 +26,16 @@ export function Prompt({ children }: { children: string }) {
         ul: ({ children }) => <ul className="list-disc pl-6 mb-3 last:mb-0 space-y-1">{children}</ul>,
         ol: ({ children }) => <ol className="list-decimal pl-6 mb-3 last:mb-0 space-y-1">{children}</ol>,
         code: ({ children }) => <code className="bg-muted px-1.5 py-0.5 rounded font-mono text-[0.9em]">{children}</code>,
-        pre: ({ children }) => <pre className="bg-muted rounded-lg p-4 overflow-x-auto mb-3 text-sm">{children}</pre>,
+        // A fenced block: the code inside drops the inline pill, and the
+        // block keeps body type even inside the display-font prompt.
+        pre: ({ children }) => (
+          <pre className="bg-muted rounded-lg p-4 overflow-x-auto mb-3 last:mb-0 font-mono text-sm font-normal leading-normal [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-[1em]">
+            {children}
+          </pre>
+        ),
       }}
     >
-      {children}
+      {displayMath(children)}
     </ReactMarkdown>
   );
 }

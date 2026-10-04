@@ -140,6 +140,41 @@ describe("ActivityCard", () => {
     expect(container.textContent).not.toContain("$");
   });
 
+  it("previews a formatted draft and shows the accepted answer rendered", async () => {
+    const answer = "It is $v_\\pi(s)$.";
+    const c = client({ record: vi.fn(async () => ({ receipt: { ...receipt("pending"), response: answer }, replayed: false })) });
+    render(<ActivityCard revision={{ ...revision, options: null, hasAnswerKey: false }} deps={{ storage: memoryStorage(), client: c }} />);
+    await waitFor(() => expect(phaseOf()).toBe("draft"));
+    const box = screen.getByLabelText("Your answer");
+    fireEvent.change(box, { target: { value: "plain words" } });
+    expect(screen.queryByTestId("answer-preview")).toBeNull();
+    fireEvent.change(box, { target: { value: answer } });
+    expect(screen.getByTestId("answer-preview").querySelector(".katex")).toBeTruthy();
+    // A line that is only $$…$$ is display math, not inline.
+    fireEvent.change(box, { target: { value: "so\n\n$$v = 1$$" } });
+    expect(screen.getByTestId("answer-preview").querySelector(".katex-display")).toBeTruthy();
+    fireEvent.change(box, { target: { value: answer } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    await waitFor(() => expect(phaseOf()).toBe("accepted"));
+    expect(screen.getByTestId("accepted-answer").querySelector(".katex")).toBeTruthy();
+    expect(screen.queryByLabelText("Your answer")).toBeNull();
+  });
+
+  it("indents with Tab inside a code fence and leaves Tab alone outside one", async () => {
+    render(<ActivityCard revision={{ ...revision, options: null, hasAnswerKey: false }} deps={{ storage: memoryStorage(), client: client() }} />);
+    await waitFor(() => expect(phaseOf()).toBe("draft"));
+    const box = screen.getByLabelText("Your answer") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "plain" } });
+    box.setSelectionRange(5, 5);
+    expect(fireEvent.keyDown(box, { key: "Tab" })).toBe(true);
+    const fenced = "```python\ndef f():\n";
+    fireEvent.change(box, { target: { value: fenced } });
+    box.setSelectionRange(fenced.length, fenced.length);
+    expect(fireEvent.keyDown(box, { key: "Tab" })).toBe(false);
+    expect(box.value).toBe(fenced + "    ");
+  });
+
   it("shows the cited page of the source under the prompt", async () => {
     const c = client();
     const cited = { ...revision, id: "rev-c", sourceResourceId: "res-1", sourceLocation: { page: 58 } };

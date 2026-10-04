@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { Prompt } from "./prompt";
 import { SourcePassage } from "./source-passage";
+import { AnswerBox } from "./answer-box";
 import { AlertCircle, Check, Clock, Lightbulb, Loader2, RotateCcw, X as XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useAttempt } from "@/hooks/use-attempt";
 import { fetchHints, requestHint, type Hint, type Revision, type AttemptStatus, type AttemptReceipt } from "@/lib/activities";
@@ -43,9 +43,10 @@ export function ActivityCard({ revision, onAccepted, deps, loadPage, hintClient 
 
   return (
     <Card className="p-8" data-phase={phase.kind}>
-      <h2 className="font-display text-xl font-medium text-foreground mb-6 leading-relaxed">
+      {/* A div, not an h2: the prompt can hold paragraphs, lists and code. */}
+      <div role="heading" aria-level={2} className="font-display text-xl font-medium text-foreground mb-6 leading-relaxed">
         <Prompt>{revision.prompt}</Prompt>
-      </h2>
+      </div>
 
       {revision.sourceResourceId && typeof revision.sourceLocation?.page === "number" && (
         <SourcePassage resourceId={revision.sourceResourceId} page={revision.sourceLocation.page} loadPage={loadPage} />
@@ -92,14 +93,7 @@ export function ActivityCard({ revision, onAccepted, deps, loadPage, hintClient 
           })}
         </div>
       ) : (
-        <Textarea
-          aria-label="Your answer"
-          value={shown}
-          onChange={(e) => setDraft(e.target.value)}
-          disabled={locked}
-          placeholder="Write your answer"
-          rows={5}
-        />
+        <AnswerBox value={shown} onChange={setDraft} disabled={locked} accepted={accepted !== null} />
       )}
 
       <div className="mt-6 flex items-center justify-between gap-4">
