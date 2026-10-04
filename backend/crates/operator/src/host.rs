@@ -12,6 +12,14 @@
 //! it while the owner lives, and clears it on `close`. A second process that
 //! finds a live lease held by another owner gets `OperatorError::Leased` and
 //! spawns nothing. A process that died leaves its lease to expire.
+//!
+//! **When the environment changes** (a grant added, as 20f did), the record
+//! under `workspace/<id>` stands under the old one and the SDK refuses to
+//! reopen it under the new (`SessionError::Mismatch`, P2-09b). The host
+//! then opens `workspace/<id>@<new environment address>`: a fresh record,
+//! idle, under the new environment, while the old record stays in storage
+//! untouched. The learner sees the operator with nothing in flight and
+//! says what to learn next; the old goal's parks are not carried over.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -120,6 +128,14 @@ impl OperatorHost {
         format!("workspace/{workspace}")
     }
 
+    /// The name of the fresh record opened when `base` stands under an
+    /// environment other than `environment` (its address as the SDK
+    /// prints it).
+    pub fn session_name_under(base: &str, environment: &str) -> String {
+        let base = base.split('@').next().unwrap_or(base);
+        format!("{base}@{environment}")
+    }
+
     /// Open (or reopen) the workspace's session: claim the lease, then
     /// spawn its owner, which opens the record and runs `install`. Opening a
     /// workspace this process already holds answers the existing handle.
@@ -142,7 +158,23 @@ impl OperatorHost {
                 64,
                 move || -> Result<Session<Record>, OperatorError> {
                     let storage = PgStorage::existing(&url, &schema)?;
-                    let mut session = Session::open(storage, &session_name, environment)?;
+                    let mut session =
+                        match Session::open(storage, &session_name, environment.clone()) {
+                            Ok(session) => session,
+                            Err(SessionError::Mismatch { recorded, given, .. }) => {
+                                let renamed = Self::session_name_under(&session_name, &given);
+                                tracing::warn!(
+                                    session = %session_name,
+                                    %recorded,
+                                    %given,
+                                    renamed = %renamed,
+                                    "the record stands under an older environment; opening a fresh record under the current one"
+                                );
+                                let storage = PgStorage::existing(&url, &schema)?;
+                                Session::open(storage, &renamed, environment)?
+                            }
+                            Err(error) => return Err(error.into()),
+                        };
                     install(&mut session);
                     Ok(session)
                 },
