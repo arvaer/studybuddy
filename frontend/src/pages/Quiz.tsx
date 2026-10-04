@@ -110,6 +110,13 @@ export default function QuizPage() {
     setWorkspace(await setGoal(workspace.id, intent));
   };
 
+  // An accepted answer wakes the operator (20b): ask where it is now, and
+  // the polling above carries on while it thinks.
+  const refreshWorkspace = () => {
+    if (!workspace?.goal) return;
+    fetchWorkspace(workspace.id).then(setWorkspace).catch(() => { /* next read */ });
+  };
+
   const operatorStatus = workspace ? operatorLine(workspace) : null;
 
   const availableConcepts = useMemo(() => {
@@ -127,6 +134,17 @@ export default function QuizPage() {
       return true;
     });
   }, [selectedTopicId, selectedConceptId, activities, allConcepts]);
+
+  // When the operator publishes, put its activity on screen.
+  useEffect(() => {
+    const id = workspace?.operator === "waiting" ? workspace.currentActivityId : null;
+    if (!id) return;
+    const index = filtered.findIndex((a) => a.id === id);
+    if (index >= 0) {
+      setCurrentIndex(index);
+      setIsComplete(false);
+    }
+  }, [filtered, workspace]);
 
   // A filter change starts the walk over. Accepted statuses are kept: they
   // are the backend's, and the card will show them again anyway.
@@ -370,7 +388,10 @@ export default function QuizPage() {
               >
                 <ActivityCard
                   revision={current.current}
-                  onAccepted={(status) => setAccepted(prev => ({ ...prev, [current.id]: status }))}
+                  onAccepted={(status) => {
+                    setAccepted(prev => ({ ...prev, [current.id]: status }));
+                    refreshWorkspace();
+                  }}
                 />
                 {current.current.sourceArtifactId && (
                   <p className="mt-3 text-xs text-muted-foreground">

@@ -125,6 +125,10 @@ mod tests {
     const SECRET: &str = "operator-secret-for-tests";
     const FIRST: &str =
         r#"(coach/present "What does the return G_t sum?" "the discounted sum of future rewards")"#;
+    const FOLLOW_UP: &str =
+        r#"(coach/present "Why discount at all?" "to bound the sum and prefer sooner reward")"#;
+    const FINISH: &str =
+        r#"(coach/finish "You can define the return and say why it is discounted.")"#;
 
     type Calls = Arc<Mutex<Vec<Effect>>>;
 
@@ -359,6 +363,127 @@ mod tests {
         assert_eq!(reopened["currentActivityId"], activity_id);
         assert_eq!(reopened["goal"]["intent"], intent);
         assert_eq!(models.lock().unwrap().len(), 1, "reopen asked no provider");
+        runtime.close(ws.parse().unwrap()).await.unwrap();
+    }
+
+    async fn revision_of(pool: &PgPool, activity: &str) -> Uuid {
+        sqlx::query_scalar("SELECT id FROM activity_revisions WHERE activity_id = $1::uuid ORDER BY revision DESC LIMIT 1")
+            .bind(activity)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn an_answer_wakes_the_operator_and_the_follow_up_lands(pool: PgPool) {
+        let models = Calls::default();
+        let (app, runtime) = serve(
+            &pool,
+            scripted(models.clone(), vec![FIRST, FOLLOW_UP, FINISH]),
+        )
+        .await;
+        let user = learner(&pool, "c@x.test").await;
+        let (_, current) = call(&app, "GET", "/api/workspaces/current", user, None).await;
+        let ws = current["id"].as_str().unwrap().to_string();
+        let (status, _) = call(
+            &app,
+            "POST",
+            &format!("/api/workspaces/{ws}/goal"),
+            user,
+            Some(json!({ "intent": "Understand the return and discounting in RL." })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let first = settled(&app, user, &ws).await;
+        let first_activity = first["currentActivityId"].as_str().unwrap().to_string();
+        let first_revision = revision_of(&pool, &first_activity).await;
+
+        // The learner answers through the ordinary attempts route. The
+        // attempt is accepted as always, and the operator wakes: the wait is
+        // receipted with the attempt, the model reads it, the follow-up
+        // lands, and the workspace waits on it.
+        let answer = json!({
+            "requestKey": "attempt-1",
+            "activityRevisionId": first_revision,
+            "response": "the discounted sum of future rewards"
+        });
+        let (status, receipt) = call(&app, "POST", "/api/attempts", user, Some(answer)).await;
+        assert_eq!(status, StatusCode::CREATED, "{receipt}");
+        assert_eq!(receipt["status"], "correct");
+        let second = settled(&app, user, &ws).await;
+        assert_eq!(second["operator"], "waiting", "{second}");
+        let second_activity = second["currentActivityId"].as_str().unwrap().to_string();
+        assert_ne!(second_activity, first_activity);
+        let (prompt,): (String,) = sqlx::query_as(
+            "SELECT r.prompt FROM activity_revisions r WHERE r.activity_id = $1::uuid",
+        )
+        .bind(&second_activity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(prompt, "Why discount at all?");
+        let (wait_receipts, attempt_in_receipt): (i64, bool) = sqlx::query_as(
+            "SELECT count(*), bool_and(payload->>'attemptId' = $1)
+             FROM effect_receipts WHERE family = 'learner/wait'",
+        )
+        .bind(receipt["attemptId"].as_str().unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((wait_receipts, attempt_in_receipt), (1, true));
+        {
+            let models = models.lock().unwrap();
+            assert_eq!(models.len(), 2);
+            let turns = &models[1].payload()[0][4];
+            assert_eq!(
+                turns[0][1][0][0], "attempt",
+                "the model read the attempt as the verb's answer"
+            );
+            assert_eq!(
+                turns[0][1][0][1]["response"],
+                "the discounted sum of future rewards"
+            );
+        }
+
+        // An attempt recorded with no wake (the process died in the gap, or
+        // the attempt came another way): the next page read finds it, the
+        // wait is receipted, and the run goes on to its end.
+        let second_revision = revision_of(&pool, &second_activity).await;
+        app::services::attempt::AttemptService::new(
+            infra::repositories::attempt::PgAttemptRepository::new(pool.clone()),
+        )
+        .record(
+            user,
+            app::dtos::attempt::RecordAttemptRequest {
+                request_key: "attempt-2".into(),
+                activity_revision_id: second_revision,
+                response: json!("sooner reward is worth more"),
+                assistance: vec![],
+            },
+        )
+        .await
+        .unwrap();
+        let finished = settled(&app, user, &ws).await;
+        assert_eq!(finished["operator"], "idle", "{finished}");
+        assert!(
+            finished["last"]
+                .as_str()
+                .unwrap()
+                .contains("You can define the return"),
+            "{finished}"
+        );
+        assert_eq!(models.lock().unwrap().len(), 3);
+        let (wait_receipts,): (i64,) =
+            sqlx::query_as("SELECT count(*) FROM effect_receipts WHERE family = 'learner/wait'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(wait_receipts, 2);
+
+        // Reading again settles nothing new and asks no model.
+        let again = settled(&app, user, &ws).await;
+        assert_eq!(again["operator"], "idle");
+        assert_eq!(models.lock().unwrap().len(), 3);
         runtime.close(ws.parse().unwrap()).await.unwrap();
     }
 }
