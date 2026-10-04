@@ -139,4 +139,17 @@ describe("ActivityCard", () => {
     expect(container.querySelectorAll("li").length).toBe(2);
     expect(container.textContent).not.toContain("$");
   });
+
+  it("shows the cited page of the source under the prompt", async () => {
+    const c = client();
+    const cited = { ...revision, id: "rev-c", sourceResourceId: "res-1", sourceLocation: { page: 58 } };
+    const loadPage = vi.fn(async () => "The Markov property is best viewed as a restriction on the state.");
+    render(<ActivityCard revision={cited} deps={{ storage: memoryStorage(), client: c }} loadPage={loadPage} />);
+    expect(screen.getByText(/Source · p\. 58/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/restriction on the state/)).toBeTruthy());
+    expect(loadPage).toHaveBeenCalledWith("res-1", 58);
+    // An uncited revision shows no passage.
+    const { container } = render(<ActivityCard revision={{ ...revision, id: "rev-u" }} deps={{ storage: memoryStorage(), client: c }} />);
+    expect(container.querySelector("[data-testid=source-passage]")).toBeNull();
+  });
 });

@@ -81,7 +81,7 @@ Filed now so the Phase 2 work keeps their data in reach; built after 20d. Owner,
 | Ticket | Slice |
 | --- | --- |
 | **21a Source read** | The run starts with `(goal sources)`: the learner's uploaded sources by id, title and page count. `coach/read id from to` applies a read-only `source/read` effect (no receipt; at most four pages of 4000 characters) and the coach names source and page in its prompts. |
-| **21b Source spans** | `coach/present` takes an optional citation `(resource-id page)`, stored as the revision's `source_resource_id` and `source_location {page}`; the card shows the cited page beside the prompt. |
+| **21b Source spans** | `coach/present` takes an optional citation `(resource-id page)`, stored as the revision's `source_resource_id` and `source_location {page}`; the card shows the cited page beside the prompt. Found on the way: the environment's `max-bytes` (16 KB on every effect's outbound payload, the model call's conversation included) refused the coach's second turn after a read; raised to 256 KB. |
 | **21c Reading is a signal** | The Learn page reports page views (`resource, page, seconds`) to the workspace; the wait's answer carries what was read since the last wake, so the coach sees the reading with the attempt. |
 | **21d Wake context recorded** | Each model call's handed-in context as a node (the "Wake context, recorded" slice below), the first consumer being the context policy. |
 | **Source spans** | A revision's `source_location` becomes `{page, start, end}` the quiz page renders beside the question from `/api/resources/{id}/pages`, so the learner reads the passage inside the activity. Pretests and gated passages are then just activities. |

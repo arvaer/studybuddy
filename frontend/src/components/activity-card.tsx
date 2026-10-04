@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Prompt } from "./prompt";
+import { SourcePassage } from "./source-passage";
 import { AlertCircle, Check, Clock, Loader2, RotateCcw, X as XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -12,6 +13,8 @@ import type { AttemptClient, AttemptStorage } from "@/lib/attempt-state";
 interface ActivityCardProps {
   revision: Revision;
   onAccepted?: (receipt: AttemptReceipt) => void;
+  /// Test seam for the cited page; the real card asks the backend.
+  loadPage?: (resourceId: string, page: number) => Promise<string>;
   deps?: { storage?: AttemptStorage; client?: AttemptClient };
 }
 
@@ -25,7 +28,7 @@ const STATUS_LABEL: Record<AttemptStatus, string> = {
 /// One revision, answered through the backend (#13). What the learner sees
 /// is exactly one of: restoring, a draft to edit, submitting, the accepted
 /// receipt, or a failure with a retry that resends the same request key.
-export function ActivityCard({ revision, onAccepted, deps }: ActivityCardProps) {
+export function ActivityCard({ revision, onAccepted, deps, loadPage }: ActivityCardProps) {
   const { phase, draft, setDraft, submit } = useAttempt(revision.id, deps);
   const accepted = phase.kind === "accepted" ? phase.receipt : null;
   const locked = phase.kind === "restoring" || phase.kind === "submitting" || accepted !== null;
@@ -38,6 +41,10 @@ export function ActivityCard({ revision, onAccepted, deps }: ActivityCardProps) 
       <h2 className="font-display text-xl font-medium text-foreground mb-6 leading-relaxed">
         <Prompt>{revision.prompt}</Prompt>
       </h2>
+
+      {revision.sourceResourceId && typeof revision.sourceLocation?.page === "number" && (
+        <SourcePassage resourceId={revision.sourceResourceId} page={revision.sourceLocation.page} loadPage={loadPage} />
+      )}
 
       {revision.options ? (
         <div className="space-y-3" role="radiogroup" aria-label="Answer options">

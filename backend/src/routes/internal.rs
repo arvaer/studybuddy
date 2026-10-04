@@ -390,18 +390,42 @@ async fn assess(
 }
 
 /// `[path, kind, prompt, answer-key]`, as the learning capsule spells it
-/// (`backend/capsules/learning.capsule`, `coach/present`): the scope path
+/// (`backend/capsules/learning.capsule`, `coach/present`), or with
+/// `resource-id, page` appended (`coach/present-from`, 21b): the scope path
 /// the environment checked, a string or the segment list the kernel read it
 /// from; then the activity's kind, its prompt and the answer the model
-/// expects (`null` for none). Capsule source has lists and strings, not
+/// expects (`null` for none), and the page of the learner's source it
+/// comes from. Capsule source has lists and strings, not
 /// objects, so the request is built here, where the manual route's DTO is.
 fn parse_present(workspace: Uuid, payload: &[Value]) -> Result<CreateActivityRequest, Response> {
-    let [path, kind, prompt, answer_key] = payload else {
-        return Err(refused(format!(
-            "{PRESENT_FAMILY} takes [path kind prompt answer-key]"
-        )));
+    let (path, kind, prompt, answer_key, citation) = match payload {
+        [path, kind, prompt, answer_key] => (path, kind, prompt, answer_key, None),
+        [path, kind, prompt, answer_key, resource, page] => {
+            (path, kind, prompt, answer_key, Some((resource, page)))
+        }
+        _ => {
+            return Err(refused(format!(
+                "{PRESENT_FAMILY} takes [path kind prompt answer-key] or [path kind prompt answer-key resource-id page]"
+            )))
+        }
     };
     scoped_path(workspace, path)?;
+    // A citation (21b): the page of the learner's source the activity
+    // comes from, shown beside the prompt. Ownership is the service's check.
+    let (source_resource_id, source_location) = match citation {
+        None => (None, None),
+        Some((resource, page)) => {
+            let Some(resource) = resource.as_str().and_then(|r| r.parse::<Uuid>().ok()) else {
+                return Err(refused(
+                    "resource-id must be the id of one of the learner's sources",
+                ));
+            };
+            let Some(page) = page.as_u64().filter(|p| *p >= 1) else {
+                return Err(refused("page must be a page number, 1-based"));
+            };
+            (Some(resource), Some(json!({ "page": page })))
+        }
+    };
     let Some(kind) = kind.as_str() else {
         return Err(refused("kind must be a string"));
     };
@@ -416,8 +440,8 @@ fn parse_present(workspace: Uuid, payload: &[Value]) -> Result<CreateActivityReq
             options: None,
             answer_key: (!answer_key.is_null()).then(|| answer_key.clone()),
             rubric: None,
-            source_resource_id: None,
-            source_location: None,
+            source_resource_id,
+            source_location,
         },
     })
 }
@@ -923,6 +947,33 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(receipts, 0);
+    }
+
+    /// `coach/present-from` cites a page of the learner's source: the
+    /// revision carries the resource and the page; another learner's source
+    /// is refused and nothing is written.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn a_presented_activity_may_cite_a_page_of_the_learners_source(pool: PgPool) {
+        let user = learner(&pool, "owner@example.com").await;
+        let ws = workspace(&pool, user).await;
+        let app = app(pool.clone(), Some(SECRET)).await;
+        let path = format!("workspaces/{ws}/activities");
+        let book = source(&pool, user, "RL book", vec!["p1".into(), "p2 text".into()]).await;
+        let cited = json!({ "id": "sha256:c1", "capability": PRESENT_FAMILY,
+            "payload": [path, "recall", "What does p. 2 say?", "p2 text", book.to_string(), 2] });
+        let (status, reply) = send(&app, post(&effect_uri(ws), Some(SECRET), &cited)).await;
+        assert_eq!(status, StatusCode::OK, "{reply}");
+        let revision = &reply["value"]["current"];
+        assert_eq!(revision["sourceResourceId"], book.to_string());
+        assert_eq!(revision["sourceLocation"], json!({ "page": 2 }));
+
+        let other = learner(&pool, "other@example.com").await;
+        let theirs = source(&pool, other, "Theirs", vec!["x".into()]).await;
+        let foreign = json!({ "id": "sha256:c2", "capability": PRESENT_FAMILY,
+            "payload": [format!("workspaces/{ws}/activities"), "recall", "q", "a", theirs.to_string(), 1] });
+        let (_, denied) = send(&app, post(&effect_uri(ws), Some(SECRET), &foreign)).await;
+        assert!(denied["refused"].is_string(), "{denied}");
+        assert_eq!(counts(&pool).await, (1, 1, 1));
     }
 
     #[sqlx::test(migrations = "./migrations")]

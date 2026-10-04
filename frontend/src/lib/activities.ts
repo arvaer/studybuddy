@@ -14,7 +14,9 @@ export interface Revision {
   hasAnswerKey: boolean;
   sourceResourceId: string | null;
   sourceArtifactId: string | null;
-  sourceLocation: unknown;
+  /// Where in the source: `{ page }` for an operator citation (21b);
+  /// older authored revisions may carry other keys.
+  sourceLocation: { page?: number; [key: string]: unknown } | null;
   createdAt: string;
 }
 
