@@ -277,7 +277,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 [[package]]
 name = "capsule-corp"
 version = "0.1.0"
-source = "git+https://github.com/Prominent-Systems/capsule-corp?rev=7ad7c4bfe36b45667a77f222c2a1772ad0a0ae60#7ad7c4bfe36b45667a77f222c2a1772ad0a0ae60"
+source = "git+https://github.com/Prominent-Systems/capsule-corp?rev=ebff40b3d44331ae41f24d0c23b3b5cc4ac1a5df#ebff40b3d44331ae41f24d0c23b3b5cc4ac1a5df"
 dependencies = [
  "serde",
  "serde_json",
@@ -288,7 +288,7 @@ dependencies = [
 [[package]]
 name = "capsule-host"
 version = "0.1.0"
-source = "git+https://github.com/Prominent-Systems/capsule-corp?rev=7ad7c4bfe36b45667a77f222c2a1772ad0a0ae60#7ad7c4bfe36b45667a77f222c2a1772ad0a0ae60"
+source = "git+https://github.com/Prominent-Systems/capsule-corp?rev=ebff40b3d44331ae41f24d0c23b3b5cc4ac1a5df#ebff40b3d44331ae41f24d0c23b3b5cc4ac1a5df"
 dependencies = [
  "capsule-corp",
  "clap",
