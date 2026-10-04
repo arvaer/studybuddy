@@ -212,6 +212,63 @@ fn ink_bounds(rgba: &[u8], w: usize, h: usize) -> (usize, usize, usize, usize) {
     )
 }
 
+/// The PDF's own table of contents (its bookmarks), each entry with the
+/// 1-based page it points to (#58). Empty when the library is missing, the
+/// file does not parse, or it has none. Bounded, since a malformed file can
+/// loop: at most `OUTLINE_DEPTH` levels and `OUTLINE_ENTRIES` entries.
+pub fn outline(bytes: &[u8]) -> Vec<domain::outline::Entry> {
+    let Some(pdfium) = pdfium() else {
+        return Vec::new();
+    };
+    let Ok(document) = pdfium.load_pdf_from_byte_slice(bytes, None) else {
+        return Vec::new();
+    };
+    let mut budget = OUTLINE_ENTRIES;
+    entries(document.bookmarks().root(), 0, &mut budget)
+}
+
+const OUTLINE_DEPTH: usize = 6;
+const OUTLINE_ENTRIES: usize = 2000;
+
+/// `first` and its following siblings, with their children.
+fn entries(
+    first: Option<PdfBookmark>,
+    depth: usize,
+    budget: &mut usize,
+) -> Vec<domain::outline::Entry> {
+    let mut out = Vec::new();
+    let mut at = first;
+    while let Some(bookmark) = at {
+        if *budget == 0 {
+            break;
+        }
+        *budget -= 1;
+        // A bookmark points at a page directly, or through a go-to action.
+        let page = bookmark
+            .destination()
+            .and_then(|d| d.page_index().ok())
+            .or_else(|| {
+                let action = bookmark.action()?;
+                let local = action.as_local_destination_action()?;
+                let index = local.destination().ok()?.page_index().ok();
+                index
+            })
+            .map(|i| i as usize + 1);
+        let children = if depth + 1 < OUTLINE_DEPTH {
+            entries(bookmark.first_child(), depth + 1, budget)
+        } else {
+            Vec::new()
+        };
+        out.push(domain::outline::Entry {
+            title: bookmark.title().unwrap_or_default(),
+            page,
+            children,
+        });
+        at = bookmark.next_sibling();
+    }
+    out
+}
+
 /// All text, pages joined by newlines.
 pub fn extract_text(bytes: &[u8]) -> String {
     extract_text_by_pages(bytes).join("\n")
@@ -288,6 +345,12 @@ mod tests {
         rgba[(60 * 100 + 50) * 4..][..3].fill(0);
         assert_eq!(ink_bounds(&rgba, 100, 100), (18, 28, 83, 93));
         assert_eq!(ink_bounds(&vec![255u8; 16 * 4], 4, 4), (0, 0, 4, 4));
+    }
+
+    #[test]
+    fn a_pdf_without_bookmarks_has_an_empty_outline() {
+        assert!(outline(HELLO).is_empty());
+        assert!(outline(b"not a pdf").is_empty());
     }
 
     #[test]

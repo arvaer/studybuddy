@@ -64,6 +64,8 @@ const ASSESS_PATH: &str = "learning.assess";
 const ASSESS_FAMILY: &str = "learning/assess";
 const SOURCE_PATH: &str = "source.read";
 const SOURCE_FAMILY: &str = "source/read";
+const LOCATE_PATH: &str = "source.locate";
+const LOCATE_FAMILY: &str = "source/locate";
 const HINT_PATH: &str = "learning.hint";
 const HINT_FAMILY: &str = "learning/hint";
 /// The most pages one read answers, and the most characters of each.
@@ -152,6 +154,7 @@ async fn effect(
         PRESENT_PATH => PRESENT_FAMILY,
         ASSESS_PATH => ASSESS_FAMILY,
         SOURCE_PATH => SOURCE_FAMILY,
+        LOCATE_PATH => LOCATE_FAMILY,
         HINT_PATH => HINT_FAMILY,
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
@@ -188,6 +191,7 @@ async fn effect(
         PRESENT_FAMILY => present(&state, workspace, owner, &req).await,
         ASSESS_FAMILY => assess(&state, workspace, owner, &req).await,
         HINT_FAMILY => hint(&state, workspace, owner, &req).await,
+        LOCATE_FAMILY => locate(&state, workspace, owner, &req).await,
         _ => read(&state, workspace, owner, &req).await,
     };
     match served {
@@ -306,6 +310,98 @@ async fn read(
         "to": to,
         "pages": read,
     })))
+}
+
+/// `[path, resource-id, section]` (`coach/contents`, #58): the entries of
+/// one of the learner's sources directly inside `section` (`""` for the top
+/// level, `"5.3"` for what is inside 5.3), each with its section number,
+/// title, page range and how many sections it holds. Read-only, so no
+/// receipt. The outline comes from the PDF's bookmarks, read the first time
+/// and kept on the resource. A source with none answers an empty list and
+/// says so; a resource that is not this learner's, or a section that is not
+/// there, answers `{"found": false}`.
+async fn locate(
+    state: &AppState,
+    workspace: Uuid,
+    owner: Uuid,
+    req: &EffectRequest,
+) -> Result<Response, Response> {
+    let [path, resource, section] = req.payload.as_slice() else {
+        return Err(refused(format!(
+            "{LOCATE_FAMILY} takes [path resource-id section]"
+        )));
+    };
+    scoped_path(workspace, path)?;
+    let not_found = |why: String| Ok(value(json!({ "found": false, "why": why })));
+    let Some(resource) = resource.as_str().and_then(|r| r.parse::<Uuid>().ok()) else {
+        return not_found(format!("{resource} is not a resource id"));
+    };
+    let section = section.as_str().unwrap_or_default().to_string();
+    let row: Option<(String, Option<Value>, Option<String>, Option<Value>)> = sqlx::query_as(
+        "SELECT title, content_pages, file_path, outline FROM resources WHERE id = $1 AND user_id = $2",
+    )
+    .bind(resource)
+    .bind(owner)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(database)?;
+    let Some((title, pages, file_path, stored)) = row else {
+        return not_found(format!("no source {resource} for this learner"));
+    };
+    let page_count = pages
+        .and_then(|p| p.as_array().map(Vec::len))
+        .unwrap_or_default();
+    let outline: Vec<domain::outline::Entry> = match stored
+        .and_then(|o| serde_json::from_value(o).ok())
+    {
+        Some(outline) => outline,
+        None => {
+            let outline = match file_path {
+                Some(file) => match tokio::fs::read(&file).await {
+                    Ok(bytes) => tokio::task::spawn_blocking(move || infra::pdf::outline(&bytes))
+                        .await
+                        .unwrap_or_default(),
+                    Err(e) => {
+                        tracing::warn!(%resource, "source file unreadable for its outline: {e}");
+                        return not_found(format!("{title} could not be opened"));
+                    }
+                },
+                None => Vec::new(),
+            };
+            sqlx::query("UPDATE resources SET outline = $1 WHERE id = $2 AND user_id = $3")
+                .bind(json!(outline))
+                .bind(resource)
+                .bind(owner)
+                .execute(&state.pool)
+                .await
+                .map_err(database)?;
+            outline
+        }
+    };
+    let reply = |entries: Vec<domain::outline::Listed>, note: Option<&str>| {
+        let mut body = json!({
+            "found": true,
+            "resourceId": resource,
+            "title": title,
+            "pageCount": page_count,
+            "section": section,
+            "entries": entries,
+        });
+        if let Some(note) = note {
+            body["note"] = json!(note);
+        }
+        Ok(value(body))
+    };
+    if outline.is_empty() {
+        return reply(
+            Vec::new(),
+            Some("this source has no table of contents; read its pages with coach/read"),
+        );
+    }
+    match domain::outline::list(&outline, &section, page_count) {
+        Some(entries) => reply(entries, None),
+        None => not_found(format!("{title} has no section {section:?}")),
+    }
 }
 
 /// `[path, revision-id, text]` (`coach/hint`, 20c): one hint on one of the
@@ -1143,6 +1239,117 @@ mod tests {
             reply["value"]["current"]["sourceLocation"],
             json!({ "page": 2, "quote": "a sentence that is not on this page" })
         );
+    }
+
+    fn locate_body(id: &str, ws: Uuid, resource: &str, section: &str) -> Value {
+        json!({ "id": id, "capability": LOCATE_FAMILY,
+            "payload": [format!("workspaces/{ws}/activities"), resource, section] })
+    }
+
+    /// `coach/contents` walks a source's outline a level at a time (#58):
+    /// the top level, then inside a section, with page ranges; a section
+    /// that is not there, another learner's source, and a source with no
+    /// outline each say so instead of failing the run.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn the_coach_walks_a_sources_table_of_contents(pool: PgPool) {
+        let user = learner(&pool, "owner@example.com").await;
+        let ws = workspace(&pool, user).await;
+        let app = app(pool.clone(), Some(SECRET)).await;
+        let book = source(&pool, user, "RL book", vec!["p".into(); 30]).await;
+        let outline = json!([
+            { "title": "Preface", "page": 2, "children": [] },
+            { "title": "Finite MDPs", "page": 10, "children": [
+                { "title": "The Agent-Environment Interface", "page": 10 },
+                { "title": "Policies and Value Functions", "page": 18 } ] },
+            { "title": "References", "page": 25, "children": [] }
+        ]);
+        sqlx::query("UPDATE resources SET outline = $1 WHERE id = $2")
+            .bind(&outline)
+            .bind(book)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let path = format!("/internal/effects/{ws}/{LOCATE_PATH}");
+
+        let (status, top) = send(
+            &app,
+            post(
+                &path,
+                Some(SECRET),
+                &locate_body("l1", ws, &book.to_string(), ""),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{top}");
+        assert_eq!(top["value"]["pageCount"], 30);
+        assert_eq!(
+            top["value"]["entries"][1],
+            json!({ "section": "2", "title": "Finite MDPs", "pages": [10, 24], "sections": 2 })
+        );
+
+        let (_, inside) = send(
+            &app,
+            post(
+                &path,
+                Some(SECRET),
+                &locate_body("l2", ws, &book.to_string(), "2"),
+            ),
+        )
+        .await;
+        assert_eq!(
+            inside["value"]["entries"][1],
+            json!({ "section": "2.2", "title": "Policies and Value Functions", "pages": [18, 24], "sections": 0 })
+        );
+
+        let (_, missing) = send(
+            &app,
+            post(
+                &path,
+                Some(SECRET),
+                &locate_body("l3", ws, &book.to_string(), "7"),
+            ),
+        )
+        .await;
+        assert_eq!(missing["value"]["found"], false, "{missing}");
+
+        let other = learner(&pool, "other@example.com").await;
+        let theirs = source(&pool, other, "Theirs", vec!["x".into()]).await;
+        let (_, foreign) = send(
+            &app,
+            post(
+                &path,
+                Some(SECRET),
+                &locate_body("l4", ws, &theirs.to_string(), ""),
+            ),
+        )
+        .await;
+        assert_eq!(foreign["value"]["found"], false, "{foreign}");
+
+        // No file to read bookmarks from: an empty outline, kept, and a note.
+        let notes = source(&pool, user, "Notes", vec!["n".into()]).await;
+        let (_, none) = send(
+            &app,
+            post(
+                &path,
+                Some(SECRET),
+                &locate_body("l5", ws, &notes.to_string(), ""),
+            ),
+        )
+        .await;
+        assert_eq!(none["value"]["entries"], json!([]));
+        assert!(
+            none["value"]["note"]
+                .as_str()
+                .unwrap()
+                .contains("coach/read"),
+            "{none}"
+        );
+        let kept: Option<Value> = sqlx::query_scalar("SELECT outline FROM resources WHERE id = $1")
+            .bind(notes)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(kept, Some(json!([])));
     }
 
     #[sqlx::test(migrations = "./migrations")]
