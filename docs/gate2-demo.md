@@ -24,7 +24,7 @@ Backend tests at the time of the run: 125 passing.
 
 ## What the run found
 
-Both are UX errors the learner would meet in the first session. Neither is fixed in this change; both are small.
+Both are UX errors the learner would meet in the first session. Neither was fixed in this change; both were, the same day (20e in #75, 20f as grading through the capsule).
 
 **After a kill, the page is dead for up to a minute.** The dead process still holds the workspace lease (TTL 60 s, renewed every 20 s), so the restarted process gets `OperatorError::Leased` on every workspace read until it lapses. That surfaces as HTTP 500 "the operator is unavailable", and because the quiz page loads the current workspace in the same `Promise.all` as topics and activities, the whole page shows a load error, not just the operator line. In the run: 48 consecutive 500s, one per second, then recovery. Two fixes, either enough on its own, both worth doing: `GET /api/workspaces/{id}` should answer the goal with an `unavailable` operator state instead of failing, so the page renders and polls; and the lease should be short (10 s, renewed every 3 s) or stealable by a process on the same host that can see the old pid is gone. The plan already says one process holds every lease, so a short TTL costs nothing.
 

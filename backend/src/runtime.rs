@@ -32,8 +32,9 @@
 //! called on every page poll.
 //!
 //! Providers: the model as this process has it (`operator::Model`, or a
-//! test's scripted one) and `learning/present` as a client of this
-//! process's own effect endpoint over loopback (`operator::providers`).
+//! test's scripted one) and `learning/present` and `learning/assess` (20f)
+//! as clients of this process's own effect endpoints over loopback
+//! (`operator::providers`).
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -58,6 +59,7 @@ use uuid::Uuid;
 pub type Installer = Arc<dyn Fn(&mut Session<Record>) + Send + Sync>;
 
 const PRESENT_FAMILY: &str = "learning/present";
+const ASSESS_FAMILY: &str = "learning/assess";
 /// How long a dead process keeps a workspace from its successor. Renewed
 /// every `LEASE_RENEWAL` by a live one; short, because every backend
 /// restart during a session is exactly this wait (20e).
@@ -140,10 +142,17 @@ impl OperatorRuntime {
         let (base_url, secret) = (self.base_url.clone(), Arc::clone(&self.secret));
         let install: Install = Box::new(move |session: &mut Session<Record>| {
             installer(session);
-            session.provide(
-                PRESENT_FAMILY,
-                operator::providers::effect_client(&base_url, workspace, PRESENT_FAMILY, secret),
-            );
+            for family in [PRESENT_FAMILY, ASSESS_FAMILY] {
+                session.provide(
+                    family,
+                    operator::providers::effect_client(
+                        &base_url,
+                        workspace,
+                        family,
+                        Arc::clone(&secret),
+                    ),
+                );
+            }
         });
         self.host
             .open(workspace, &capsule::environment(workspace), install)

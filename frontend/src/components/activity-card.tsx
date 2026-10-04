@@ -6,12 +6,12 @@ import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useAttempt } from "@/hooks/use-attempt";
-import type { Revision, AttemptStatus } from "@/lib/activities";
+import type { Revision, AttemptStatus, AttemptReceipt } from "@/lib/activities";
 import type { AttemptClient, AttemptStorage } from "@/lib/attempt-state";
 
 interface ActivityCardProps {
   revision: Revision;
-  onAccepted?: (status: AttemptStatus) => void;
+  onAccepted?: (receipt: AttemptReceipt) => void;
   deps?: { storage?: AttemptStorage; client?: AttemptClient };
 }
 
@@ -116,6 +116,11 @@ export function ActivityCard({ revision, onAccepted, deps }: ActivityCardProps) 
               )}
             </span>
           )}
+          {accepted?.assessment?.feedback && (
+            <div className="text-sm text-muted-foreground" data-testid="coach-feedback">
+              <Prompt>{accepted.assessment.feedback}</Prompt>
+            </div>
+          )}
         </div>
 
         {phase.kind === "failed" && phase.retryable ? (
@@ -131,15 +136,15 @@ export function ActivityCard({ revision, onAccepted, deps }: ActivityCardProps) 
           )
         )}
       </div>
-      {accepted && onAccepted && <AcceptedOnce status={accepted.status} onAccepted={onAccepted} />}
+      {accepted && onAccepted && <AcceptedOnce receipt={accepted} onAccepted={onAccepted} />}
     </Card>
   );
 }
 
 // Reports the accepted status upward exactly once per mount.
-function AcceptedOnce({ status, onAccepted }: { status: AttemptStatus; onAccepted: (s: AttemptStatus) => void }) {
+function AcceptedOnce({ receipt, onAccepted }: { receipt: AttemptReceipt; onAccepted: (r: AttemptReceipt) => void }) {
   useEffect(() => {
-    onAccepted(status);
+    onAccepted(receipt);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return null;

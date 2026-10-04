@@ -44,10 +44,10 @@ impl ActivityKind {
 /// A stable, owned practice item. Content lives in its revisions.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Activity {
-    pub id:         Uuid,
-    pub user_id:    Uuid,
+    pub id: Uuid,
+    pub user_id: Uuid,
     pub concept_id: Option<Uuid>,
-    pub kind:       ActivityKind,
+    pub kind: ActivityKind,
     pub created_at: DateTime<Utc>,
 }
 
@@ -55,38 +55,38 @@ pub struct Activity {
 /// only after the ownership predicate has passed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActivityRevision {
-    pub id:                 Uuid,
-    pub activity_id:        Uuid,
-    pub revision:           i32,
-    pub prompt:             String,
-    pub options:            Option<Vec<String>>,
-    pub answer_key:         Option<Value>,
-    pub rubric:             Option<String>,
+    pub id: Uuid,
+    pub activity_id: Uuid,
+    pub revision: i32,
+    pub prompt: String,
+    pub options: Option<Vec<String>>,
+    pub answer_key: Option<Value>,
+    pub rubric: Option<String>,
     pub source_resource_id: Option<Uuid>,
     /// The exact upload the source resource had when this revision was
     /// authored (#11). Copied by the adapter; never supplied by the client.
     pub source_artifact_id: Option<Uuid>,
-    pub source_location:    Option<Value>,
-    pub created_at:         DateTime<Utc>,
+    pub source_location: Option<Value>,
+    pub created_at: DateTime<Utc>,
 }
 
 /// An activity with the revision a learner selecting it today would see.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActivityWithRevision {
     pub activity: Activity,
-    pub current:  ActivityRevision,
+    pub current: ActivityRevision,
 }
 
 /// What an author supplies for one revision (#41). Validated here so the
 /// assessment rule in `assess` always finds a shape it understands.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RevisionContent {
-    pub prompt:             String,
-    pub options:            Option<Vec<String>>,
-    pub answer_key:         Option<Value>,
-    pub rubric:             Option<String>,
+    pub prompt: String,
+    pub options: Option<Vec<String>>,
+    pub answer_key: Option<Value>,
+    pub rubric: Option<String>,
     pub source_resource_id: Option<Uuid>,
-    pub source_location:    Option<Value>,
+    pub source_location: Option<Value>,
 }
 
 pub const PROMPT_MAX_LEN: usize = 10_000;
@@ -102,11 +102,15 @@ impl RevisionContent {
             return Err(DomainError::Validation("prompt is required".into()));
         }
         if prompt.len() > PROMPT_MAX_LEN {
-            return Err(DomainError::Validation(format!("prompt exceeds {PROMPT_MAX_LEN} characters")));
+            return Err(DomainError::Validation(format!(
+                "prompt exceeds {PROMPT_MAX_LEN} characters"
+            )));
         }
         if let Some(options) = &self.options {
             if options.len() < 2 {
-                return Err(DomainError::Validation("options need at least two entries".into()));
+                return Err(DomainError::Validation(
+                    "options need at least two entries".into(),
+                ));
             }
             if options.iter().any(|o| o.trim().is_empty()) {
                 return Err(DomainError::Validation("options must not be blank".into()));
@@ -117,11 +121,17 @@ impl RevisionContent {
             }
             match &self.answer_key {
                 Some(Value::String(key)) if options.contains(key) => {}
-                _ => return Err(DomainError::Validation("answerKey must be one of the options".into())),
+                _ => {
+                    return Err(DomainError::Validation(
+                        "answerKey must be one of the options".into(),
+                    ))
+                }
             }
         }
         if self.source_location.is_some() && self.source_resource_id.is_none() {
-            return Err(DomainError::Validation("sourceLocation needs a sourceResourceId".into()));
+            return Err(DomainError::Validation(
+                "sourceLocation needs a sourceResourceId".into(),
+            ));
         }
         Ok(())
     }
@@ -131,18 +141,18 @@ impl RevisionContent {
 /// and must own the linked concept and source resource, if any.
 #[derive(Debug, Clone)]
 pub struct NewActivity {
-    pub user_id:    Uuid,
-    pub kind:       ActivityKind,
+    pub user_id: Uuid,
+    pub kind: ActivityKind,
     pub concept_id: Option<Uuid>,
-    pub content:    RevisionContent,
+    pub content: RevisionContent,
 }
 
 /// Add a revision to an owned activity. Earlier revisions are untouched.
 #[derive(Debug, Clone)]
 pub struct NewRevision {
-    pub user_id:     Uuid,
+    pub user_id: Uuid,
     pub activity_id: Uuid,
-    pub content:     RevisionContent,
+    pub content: RevisionContent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -205,9 +215,9 @@ impl AssessmentMethod {
 /// An assessment as stored. `revision` numbers corrections per attempt.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Assessment {
-    pub outcome:  AssessmentOutcome,
-    pub method:   AssessmentMethod,
-    pub score:    Option<f64>,
+    pub outcome: AssessmentOutcome,
+    pub method: AssessmentMethod,
+    pub score: Option<f64>,
     pub feedback: String,
 }
 
@@ -216,11 +226,11 @@ pub struct Assessment {
 /// learner; resending it replays the receipt instead of recording again.
 #[derive(Debug, Clone)]
 pub struct RecordAttempt {
-    pub user_id:              Uuid,
-    pub request_key:          String,
+    pub user_id: Uuid,
+    pub request_key: String,
     pub activity_revision_id: Uuid,
-    pub response:             Value,
-    pub assistance:           Vec<Value>,
+    pub response: Value,
+    pub assistance: Vec<Value>,
 }
 
 impl RecordAttempt {
@@ -228,7 +238,12 @@ impl RecordAttempt {
     /// revision, the response and the assistance are all identical. JSON
     /// equality is structural, so key order does not matter but `"1"` and
     /// `1` do.
-    pub fn same_payload(&self, activity_revision_id: Uuid, response: &Value, assistance: &Value) -> bool {
+    pub fn same_payload(
+        &self,
+        activity_revision_id: Uuid,
+        response: &Value,
+        assistance: &Value,
+    ) -> bool {
         self.activity_revision_id == activity_revision_id
             && &self.response == response
             && Value::Array(self.assistance.clone()) == *assistance
@@ -239,7 +254,7 @@ impl RecordAttempt {
 /// earlier submission with the same request key rather than newly written.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Recorded {
-    pub receipt:  AttemptReceipt,
+    pub receipt: AttemptReceipt,
     pub replayed: bool,
 }
 
@@ -247,13 +262,13 @@ pub struct Recorded {
 /// attempt is pending; pending is never reported as incorrect.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AttemptReceipt {
-    pub attempt_id:           Uuid,
+    pub attempt_id: Uuid,
     pub activity_revision_id: Uuid,
-    pub submitted_at:         DateTime<Utc>,
+    pub submitted_at: DateTime<Utc>,
     /// The answer exactly as submitted, so a client can show what was
     /// answered after a refresh without keeping its own copy (#13).
-    pub response:             Value,
-    pub assessment:           Option<Assessment>,
+    pub response: Value,
+    pub assessment: Option<Assessment>,
 }
 
 impl AttemptReceipt {
@@ -271,37 +286,41 @@ impl AttemptReceipt {
 ///
 /// - A string key with `options`: the response must be one of the options
 ///   (else `Validation`), method `choice`, exact comparison.
-/// - A string key without options: method `exact_match`, compared after
-///   trimming, case-folding and collapsing whitespace.
-/// - Any other key shape (or none): pending.
-pub fn assess(revision: &ActivityRevision, response: &Value) -> Result<Option<Assessment>, DomainError> {
-    let Some(Value::String(key)) = &revision.answer_key else {
+/// - Anything else, including a string key without options: pending. A
+///   free-text answer is assessed by the operator (`learning/assess`,
+///   method `model`), never by comparing wording (owner, 2026-10-03:
+///   "grade should be a capsule"). `exact_match` remains a method old rows
+///   carry.
+pub fn assess(
+    revision: &ActivityRevision,
+    response: &Value,
+) -> Result<Option<Assessment>, DomainError> {
+    let (Some(Value::String(key)), Some(options)) = (&revision.answer_key, &revision.options)
+    else {
         return Ok(None);
     };
     let Value::String(answer) = response else {
-        return Err(DomainError::Validation("response must be a string for this activity".into()));
+        return Err(DomainError::Validation(
+            "response must be a string for this activity".into(),
+        ));
     };
-
-    let (method, correct) = match &revision.options {
-        Some(options) => {
-            if !options.iter().any(|o| o == answer) {
-                return Err(DomainError::Validation("response is not one of the options".into()));
-            }
-            (AssessmentMethod::Choice, answer == key)
-        }
-        None => (AssessmentMethod::ExactMatch, normalize(answer) == normalize(key)),
-    };
+    if !options.iter().any(|o| o == answer) {
+        return Err(DomainError::Validation(
+            "response is not one of the options".into(),
+        ));
+    }
+    let (method, correct) = (AssessmentMethod::Choice, answer == key);
 
     Ok(Some(Assessment {
-        outcome: if correct { AssessmentOutcome::Correct } else { AssessmentOutcome::Incorrect },
+        outcome: if correct {
+            AssessmentOutcome::Correct
+        } else {
+            AssessmentOutcome::Incorrect
+        },
         method,
         score: Some(if correct { 1.0 } else { 0.0 }),
         feedback: String::new(),
     }))
-}
-
-fn normalize(s: &str) -> String {
-    s.split_whitespace().map(str::to_lowercase).collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]
@@ -340,40 +359,66 @@ mod tests {
     fn revision_content_rules() {
         assert!(content(None, None).validate().is_ok());
         assert!(content(None, Some(json!("policy"))).validate().is_ok());
-        assert!(content(Some(vec!["Reward", "Value"]), Some(json!("Value"))).validate().is_ok());
+        assert!(content(Some(vec!["Reward", "Value"]), Some(json!("Value")))
+            .validate()
+            .is_ok());
 
         let bad = [
-            RevisionContent { prompt: "  ".into(), ..content(None, None) },
-            RevisionContent { prompt: "x".repeat(PROMPT_MAX_LEN + 1), ..content(None, None) },
+            RevisionContent {
+                prompt: "  ".into(),
+                ..content(None, None)
+            },
+            RevisionContent {
+                prompt: "x".repeat(PROMPT_MAX_LEN + 1),
+                ..content(None, None)
+            },
             content(Some(vec!["Only"]), Some(json!("Only"))),
             content(Some(vec!["A", " "]), Some(json!("A"))),
             content(Some(vec!["A", "A"]), Some(json!("A"))),
             content(Some(vec!["A", "B"]), None),
             content(Some(vec!["A", "B"]), Some(json!("C"))),
             content(Some(vec!["A", "B"]), Some(json!(["A"]))),
-            RevisionContent { source_location: Some(json!({"page": 3})), ..content(None, None) },
+            RevisionContent {
+                source_location: Some(json!({"page": 3})),
+                ..content(None, None)
+            },
         ];
         for c in bad {
-            assert!(matches!(c.validate(), Err(DomainError::Validation(_))), "{c:?}");
+            assert!(
+                matches!(c.validate(), Err(DomainError::Validation(_))),
+                "{c:?}"
+            );
         }
     }
 
     #[test]
-    fn exact_match_ignores_case_and_whitespace() {
+    fn a_key_without_options_leaves_the_attempt_pending_for_the_operator() {
         let rev = revision(None, Some(json!("A mapping  from States to actions")));
-        let a = assess(&rev, &json!("  a mapping from states to actions ")).unwrap().unwrap();
-        assert_eq!((a.outcome, a.method, a.score), (AssessmentOutcome::Correct, AssessmentMethod::ExactMatch, Some(1.0)));
-
-        let a = assess(&rev, &json!("a table of action values")).unwrap().unwrap();
-        assert_eq!((a.outcome, a.score), (AssessmentOutcome::Incorrect, Some(0.0)));
+        assert_eq!(
+            assess(&rev, &json!("a mapping from states to actions")).unwrap(),
+            None
+        );
+        assert_eq!(
+            assess(&rev, &json!("a table of action values")).unwrap(),
+            None
+        );
     }
 
     #[test]
     fn choice_requires_one_of_the_options_and_compares_exactly() {
         let rev = revision(Some(vec!["Reward", "Value"]), Some(json!("Value")));
-        assert_eq!(assess(&rev, &json!("Value")).unwrap().unwrap().outcome, AssessmentOutcome::Correct);
-        assert_eq!(assess(&rev, &json!("Reward")).unwrap().unwrap().outcome, AssessmentOutcome::Incorrect);
-        assert!(matches!(assess(&rev, &json!("value")), Err(DomainError::Validation(_))));
+        assert_eq!(
+            assess(&rev, &json!("Value")).unwrap().unwrap().outcome,
+            AssessmentOutcome::Correct
+        );
+        assert_eq!(
+            assess(&rev, &json!("Reward")).unwrap().unwrap().outcome,
+            AssessmentOutcome::Incorrect
+        );
+        assert!(matches!(
+            assess(&rev, &json!("value")),
+            Err(DomainError::Validation(_))
+        ));
     }
 
     #[test]
@@ -402,13 +447,22 @@ mod tests {
 
     #[test]
     fn non_string_response_to_a_keyed_activity_is_rejected() {
-        let rev = revision(None, Some(json!("x")));
-        assert!(matches!(assess(&rev, &json!({"text": "x"})), Err(DomainError::Validation(_))));
+        let rev = revision(Some(vec!["x", "y"]), Some(json!("x")));
+        assert!(matches!(
+            assess(&rev, &json!({"text": "x"})),
+            Err(DomainError::Validation(_))
+        ));
     }
 
     #[test]
     fn receipt_status_is_pending_without_assessment() {
-        let r = AttemptReceipt { attempt_id: Uuid::nil(), activity_revision_id: Uuid::nil(), submitted_at: Utc::now(), response: Value::Null, assessment: None };
+        let r = AttemptReceipt {
+            attempt_id: Uuid::nil(),
+            activity_revision_id: Uuid::nil(),
+            submitted_at: Utc::now(),
+            response: Value::Null,
+            assessment: None,
+        };
         assert_eq!(r.status(), "pending");
     }
 }

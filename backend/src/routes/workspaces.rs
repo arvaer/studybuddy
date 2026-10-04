@@ -148,6 +148,18 @@ mod tests {
         r#"(coach/present "Why discount at all?" "to bound the sum and prefer sooner reward")"#;
     const FINISH: &str =
         r#"(coach/finish "You can define the return and say why it is discounted.")"#;
+    /// `{{attempt}}` is the id of the attempt in the latest turn, which the
+    /// scripted model reads from its request as the real one does.
+    const ASSESS: &str =
+        r#"(coach/assess "{{attempt}}" "correct" "Yes: each reward is discounted by its delay.")"#;
+
+    /// The attemptId in the newest turn's result, if the newest turn
+    /// answered an attempt.
+    fn latest_attempt(effect: &Effect) -> Option<String> {
+        let turns = effect.payload().first()?.get(4)?.as_array()?;
+        let newest = turns.first()?;
+        newest[1][0][1]["attemptId"].as_str().map(str::to_string)
+    }
 
     type Calls = Arc<Mutex<Vec<Effect>>>;
 
@@ -180,7 +192,12 @@ mod tests {
                 if forms.is_empty() {
                     return Reply::Declined("the script is over".into());
                 }
-                Reply::Value(json!({ "form": forms.remove(0) }))
+                let form = forms.remove(0);
+                let form = match latest_attempt(effect) {
+                    Some(id) => form.replace("{{attempt}}", &id),
+                    None => form.to_string(),
+                };
+                Reply::Value(json!({ "form": form }))
             });
         })
     }
@@ -416,7 +433,10 @@ mod tests {
         let models = Calls::default();
         let (app, runtime) = serve(
             &pool,
-            scripted(models.clone(), vec![FIRST, FOLLOW_UP, FINISH]),
+            scripted(
+                models.clone(),
+                vec![FIRST, ASSESS, FOLLOW_UP, ASSESS, FINISH],
+            ),
         )
         .await;
         let user = learner(&pool, "c@x.test").await;
@@ -446,7 +466,10 @@ mod tests {
         });
         let (status, receipt) = call(&app, "POST", "/api/attempts", user, Some(answer)).await;
         assert_eq!(status, StatusCode::CREATED, "{receipt}");
-        assert_eq!(receipt["status"], "correct");
+        assert_eq!(
+            receipt["status"], "pending",
+            "free text is the operator's to judge"
+        );
         let second = settled(&app, user, &ws).await;
         assert_eq!(second["operator"], "waiting", "{second}");
         let second_activity = second["currentActivityId"].as_str().unwrap().to_string();
@@ -470,7 +493,7 @@ mod tests {
         assert_eq!((wait_receipts, attempt_in_receipt), (1, true));
         {
             let models = models.lock().unwrap();
-            assert_eq!(models.len(), 2);
+            assert_eq!(models.len(), 3, "present, assess, present");
             let turns = &models[1].payload()[0][4];
             assert_eq!(
                 turns[0][1][0][0], "attempt",
@@ -480,7 +503,27 @@ mod tests {
                 turns[0][1][0][1]["response"],
                 "the discounted sum of future rewards"
             );
+            let assessed = &models[2].payload()[0][4][0][1][0];
+            assert_eq!(assessed[0], "assessed", "{assessed}");
+            assert_eq!(assessed[1]["assessed"], true, "{assessed}");
         }
+        // The operator's assessment is the attempt's: correct, by the model,
+        // with the feedback the learner reads.
+        let (status, judged) = call(
+            &app,
+            "GET",
+            &format!("/api/attempts/{}", receipt["attemptId"].as_str().unwrap()),
+            user,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(judged["status"], "correct", "{judged}");
+        assert_eq!(judged["assessment"]["method"], "model");
+        assert_eq!(
+            judged["assessment"]["feedback"],
+            "Yes: each reward is discounted by its delay."
+        );
 
         // An attempt recorded with no wake (the process died in the gap, or
         // the attempt came another way): the next page read finds it, the
@@ -509,7 +552,11 @@ mod tests {
                 .contains("You can define the return"),
             "{finished}"
         );
-        assert_eq!(models.lock().unwrap().len(), 3);
+        assert_eq!(
+            models.lock().unwrap().len(),
+            5,
+            "present, assess, present, assess, finish"
+        );
         let (wait_receipts,): (i64,) =
             sqlx::query_as("SELECT count(*) FROM effect_receipts WHERE family = 'learner/wait'")
                 .fetch_one(&pool)
@@ -520,7 +567,7 @@ mod tests {
         // Reading again settles nothing new and asks no model.
         let again = settled(&app, user, &ws).await;
         assert_eq!(again["operator"], "idle");
-        assert_eq!(models.lock().unwrap().len(), 3);
+        assert_eq!(models.lock().unwrap().len(), 5);
         runtime.close(ws.parse().unwrap()).await.unwrap();
     }
 

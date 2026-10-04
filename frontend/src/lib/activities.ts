@@ -35,7 +35,16 @@ export interface AttemptReceipt {
   status: AttemptStatus;
   /// The answer exactly as submitted; a string for keyed activities.
   response: unknown;
-  assessment: unknown;
+  assessment: Assessment | null;
+}
+
+/// How an attempt was judged: `choice` by the backend against the options,
+/// `model` by the operator (20f), with the feedback it wrote for the learner.
+export interface Assessment {
+  outcome: Exclude<AttemptStatus, "pending">;
+  method: "choice" | "exact_match" | "model" | "manual";
+  score: number | null;
+  feedback: string;
 }
 
 export interface RecordAttemptRequest {
