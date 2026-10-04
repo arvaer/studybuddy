@@ -129,4 +129,14 @@ describe("ActivityCard", () => {
     expect(screen.getByText("Draft, not submitted")).toBeInTheDocument();
     expect(c.record).not.toHaveBeenCalled();
   });
+
+  it("renders the prompt as markdown with math", () => {
+    const c = client();
+    const math = { ...revision, id: "rev-m", prompt: "Use $G_t = R_{t+1} + \\gamma G_{t+1}$ with **three** steps:\n\n- $R_1 = 1$\n- $R_2 = 0$" };
+    const { container } = render(<ActivityCard revision={math} deps={{ storage: memoryStorage(), client: c }} />);
+    expect(container.querySelectorAll(".katex").length).toBe(3);
+    expect(screen.getByText("three").tagName).toBe("STRONG");
+    expect(container.querySelectorAll("li").length).toBe(2);
+    expect(container.textContent).not.toContain("$");
+  });
 });
