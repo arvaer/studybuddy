@@ -51,6 +51,9 @@ impl IntoResponse for HttpError {
             AppError::Validation(msg) => {
                 (StatusCode::UNPROCESSABLE_ENTITY, msg.clone())
             }
+            AppError::PayloadTooLarge(msg) => {
+                (StatusCode::PAYLOAD_TOO_LARGE, msg.clone())
+            }
             AppError::TooManyRequests { retry_after_secs } => {
                 let body = Json(json!({ "error": "too many attempts; try again later" }));
                 return (
