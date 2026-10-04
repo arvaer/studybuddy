@@ -183,6 +183,19 @@ describe("ActivityCard", () => {
     expect(emphasis).toEqual(["_this_"]);
   });
 
+  it("colors Python the same in the prompt and in the answer editor", async () => {
+    const code = "```python\ndef f(s):\n    return 1  # one\n```";
+    const { container } = render(<ActivityCard revision={{ ...revision, prompt: `Read:\n\n${code}`, options: null, hasAnswerKey: false }} deps={{ storage: memoryStorage(), client: client() }} />);
+    await waitFor(() => expect(container.querySelector("[data-phase=draft]")).toBeTruthy());
+    const prompt = screen.getByRole("heading");
+    expect([...prompt.querySelectorAll(".tok-keyword")].map((e) => e.textContent)).toEqual(["def", "return"]);
+    expect(prompt.querySelector(".tok-comment")?.textContent).toBe("# one");
+
+    const editor = typeAnswer(code);
+    await waitFor(() => expect(editor.dom.querySelectorAll(".tok-keyword").length).toBe(2));
+    expect(editor.dom.querySelector(".tok-comment")?.textContent).toBe("# one");
+  });
+
   it("indents with Tab inside a code fence and leaves Tab alone outside one", async () => {
     render(<ActivityCard revision={{ ...revision, options: null, hasAnswerKey: false }} deps={{ storage: memoryStorage(), client: client() }} />);
     await waitFor(() => expect(phaseOf()).toBe("draft"));

@@ -12,8 +12,9 @@ import { markdown } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { Compartment, EditorState, RangeSetBuilder, StateField, type Range } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, keymap, placeholder as placeholderExt, type DecorationSet } from "@codemirror/view";
-import { tags } from "@lezer/highlight";
+import { classHighlighter, tags } from "@lezer/highlight";
 import type { MarkdownConfig } from "@lezer/markdown";
+import { codeLanguage } from "@/lib/code-languages";
 import { codeRanges, mathSpans } from "@/lib/math-spans";
 
 class MathWidget extends WidgetType {
@@ -167,8 +168,10 @@ export function MathEditor({ value, onChange, disabled = false, placeholder = ""
           tabInFence,
           fenceAtLineStart,
           keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
-          markdown({ extensions: [texInMarkdown] }),
+          markdown({ extensions: [texInMarkdown], codeLanguages: codeLanguage }),
           syntaxHighlighting(markdownStyle),
+          // Code inside a fence: the tok-* classes rendered Markdown uses too.
+          syntaxHighlighting(classHighlighter),
           EditorView.lineWrapping,
           livePreview,
           theme,
