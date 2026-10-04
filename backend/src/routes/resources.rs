@@ -20,11 +20,16 @@ use crate::error::HttpError;
 use crate::routes::extractor::AuthUser;
 use crate::state::AppState;
 
+/// The largest upload taken, whole file plus form fields. A textbook PDF
+/// runs to 70–100 MB; the file is held in memory until stored (#12).
+pub const MAX_UPLOAD_MB: usize = 200;
+const MAX_UPLOAD_BYTES: usize = MAX_UPLOAD_MB * 1024 * 1024;
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/resources",              get(list).post(create))
         .route("/resources/upload",       axum::routing::post(upload)
-            .layer(DefaultBodyLimit::max(50 * 1024 * 1024))) // 50 MB
+            .layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES)))
         .route("/resources/{id}",         delete(delete_one))
         .route("/resources/{id}/content", get(get_content))
         .route("/resources/{id}/pages",   get(get_pages))
@@ -62,6 +67,16 @@ async fn create(
     Ok((axum::http::StatusCode::CREATED, Json(svc.create(user_id, req).await?)))
 }
 
+/// A multipart failure as the client should read it: the body limit is 413
+/// naming the limit, anything else 422 with what went wrong.
+fn multipart_error(what: &str, e: axum::extract::multipart::MultipartError) -> HttpError {
+    if e.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE {
+        HttpError(AppError::PayloadTooLarge(format!("file is larger than {MAX_UPLOAD_MB} MB")))
+    } else {
+        HttpError(AppError::Validation(format!("{what}: {e}")))
+    }
+}
+
 async fn upload(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -79,7 +94,7 @@ async fn upload(
     while let Some(field) = multipart
         .next_field()
         .await
-        .map_err(|e| HttpError(AppError::Validation(format!("multipart error: {e}"))))?
+        .map_err(|e| multipart_error("multipart error", e))?
     {
         let name = field.name().unwrap_or("").to_string();
         match name.as_str() {
@@ -92,7 +107,7 @@ async fn upload(
                     // A body that ends early is the client's failure, and
                     // nothing has been stored yet: the store is not touched
                     // until the whole field is in memory (#12).
-                    .map_err(|e| HttpError(AppError::Validation(format!("incomplete upload: {e}"))))?
+                    .map_err(|e| multipart_error("incomplete upload", e))?
                     .to_vec();
             }
             "topicId" => topic_id_str = field.text().await.unwrap_or_default(),
@@ -120,8 +135,13 @@ async fn upload(
     // Extract text based on file type
     let is_pdf = filename.to_lowercase().ends_with(".pdf");
     let resource_type = if is_pdf { "pdf" } else { "article" };
+    // Text extraction from a large PDF takes seconds of CPU: off the
+    // async worker, so other requests keep being served meanwhile.
     let content_pages = if is_pdf {
-        infra::pdf::extract_text_by_pages(&bytes)
+        let pdf = bytes.clone();
+        tokio::task::spawn_blocking(move || infra::pdf::extract_text_by_pages(&pdf))
+            .await
+            .map_err(|_| HttpError(AppError::Unexpected("text extraction was cancelled".into())))?
     } else {
         vec![String::from_utf8_lossy(&bytes).to_string()]
     };

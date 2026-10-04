@@ -68,9 +68,6 @@ validator = { version = "0.19", features = ["derive"] }
 # HTTP client (LLM proxy)
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
-# PDF text extraction
-pdf-extract = "0.10"
-
 # Capsule Core (docs/capsule-integration.md, "Revisit after Phase 1"): one pin,
 # the probe's. capsule-host's `postgres` feature is PgStorage (H4).
 capsule-corp = { git = "https://github.com/Prominent-Systems/capsule-corp", rev = "7ad7c4bfe36b45667a77f222c2a1772ad0a0ae60" }
