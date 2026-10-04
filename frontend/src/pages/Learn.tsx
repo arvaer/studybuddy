@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronLeft,
@@ -25,6 +25,8 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { ReinforcementPrompt } from "@/components/reinforcement-prompt";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { PdfViewer } from "@/components/pdf-viewer";
+import { fetchCurrentWorkspace } from "@/lib/workspace";
+import { ReadingClock, reportStay } from "@/lib/reading";
 import { GenerateRuModal } from "@/components/generate-ru-modal";
 import { UploadResourceModal } from "@/components/upload-resource-modal";
 import { StateBadge } from "@/components/ui/state-badge";
@@ -148,6 +150,25 @@ export default function LearnPage() {
   const [showPrompt, setShowPrompt] = useState(true);
   const [showNotes, setShowNotes] = useState(true);
   const [readProgress, setReadProgress] = useState(0);
+  // Reading is a signal (21c): each stay on a page goes to the workspace,
+  // where the operator reads it with the next attempt.
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const clock = useRef(new ReadingClock());
+  useEffect(() => {
+    fetchCurrentWorkspace().then((w) => setWorkspaceId(w.id)).catch(() => { /* reading still works */ });
+  }, []);
+  useEffect(() => {
+    const flush = () => {
+      const stay = clock.current.leave(Date.now());
+      if (stay && workspaceId) void reportStay(workspaceId, stay);
+    };
+    const onHide = () => { if (document.visibilityState === "hidden") flush(); };
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      flush();
+    };
+  }, [workspaceId, contentResource?.id]);
   const [activeTab, setActiveTab] = useState<'reading' | 'video'>('reading');
   const [videoUrl, setVideoUrl] = useState('');
   const [loadedVideoUrl, setLoadedVideoUrl] = useState('');
@@ -409,6 +430,8 @@ export default function LearnPage() {
                     url={`/api/resources/${contentResource.id}/file`}
                     onPageChange={(page, total) => {
                       setReadProgress(Math.round((page / total) * 100));
+                      const stay = clock.current.enter(contentResource.id, page, Date.now());
+                      if (stay && workspaceId) void reportStay(workspaceId, stay);
                     }}
                   />
                 ) : hasContent ? (

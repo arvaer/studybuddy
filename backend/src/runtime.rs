@@ -16,7 +16,9 @@
 //! runs on every state read, so an attempt recorded while the process was
 //! down, or in the gap before its receipt, is picked up on the next page
 //! read, and reconcile (18c) completes any park whose receipt already
-//! exists. Reopen itself asks no provider.
+//! exists. Reopen itself asks no provider. The receipt also carries what
+//! the learner read since the coach's last turn (21c): the page stays the
+//! reading page reported, each delivered once.
 //!
 //! **A kill mid-think is resumed (20d).** A run interrupted at `call/model`
 //! or `learning/present`, by the process dying or by the adapter answering
@@ -290,9 +292,33 @@ impl OperatorRuntime {
                 .get(owner, attempt)
                 .await
                 .map_err(|e| repository(domain::errors::DomainError::Repository(e.to_string())))?;
-            let payload = serde_json::to_value(&receipt)
+            let mut payload = serde_json::to_value(&receipt)
                 .map_err(|e| repository(domain::errors::DomainError::Repository(e.to_string())))?;
             let mut tx = self.pool.begin().await?;
+            // What the learner read since the coach's last turn (21c),
+            // delivered with this receipt and marked so in the same
+            // transaction, so each stay reaches the coach once.
+            let reading: Vec<(Uuid, String, i32, i32)> = sqlx::query_as(
+                "UPDATE page_views v SET delivered_at = now()
+                 FROM resources r
+                 WHERE v.resource_id = r.id AND v.workspace_id = $1 AND v.delivered_at IS NULL
+                 RETURNING v.resource_id, r.title, v.page, v.seconds",
+            )
+            .bind(workspace)
+            .fetch_all(&mut *tx)
+            .await?;
+            if !reading.is_empty() {
+                let mut reading: Vec<_> = reading;
+                reading.sort_by_key(|(_, _, page, _)| *page);
+                payload["reading"] = Value::Array(
+                    reading
+                        .into_iter()
+                        .map(|(id, title, page, seconds)| {
+                            json!({ "resourceId": id, "title": title, "page": page, "seconds": seconds })
+                        })
+                        .collect(),
+                );
+            }
             let recorded = receipts::record(
                 &mut tx,
                 &Receipt {

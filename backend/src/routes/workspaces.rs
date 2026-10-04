@@ -23,6 +23,15 @@ pub fn router() -> Router<AppState> {
         .route("/workspaces/current", get(current))
         .route("/workspaces/{id}", get(get_one))
         .route("/workspaces/{id}/goal", post(set_goal))
+        .route("/workspaces/{id}/reading", post(reading))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReadingRequest {
+    pub resource_id: Uuid,
+    pub page: i32,
+    pub seconds: i32,
 }
 
 #[derive(Debug, Serialize)]
@@ -88,6 +97,41 @@ async fn get_one(
 ) -> Result<impl IntoResponse, HttpError> {
     let workspace = repo(&state).owned(user_id, id).await?;
     Ok(Json(describe(&state, workspace).await?))
+}
+
+/// A stay on a page of one of the learner's sources (21c): recorded for
+/// the operator, who reads it with the next attempt. 204; a page or
+/// resource that is not theirs is 404 or 422, and nothing is written.
+async fn reading(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(id): Path<Uuid>,
+    Json(req): Json<ReadingRequest>,
+) -> Result<impl IntoResponse, HttpError> {
+    let workspace = repo(&state).owned(user_id, id).await?;
+    if req.page < 1 || !(0..=3600).contains(&req.seconds) {
+        return Err(HttpError(app::errors::AppError::Validation(
+            "page is 1-based and seconds is 0..=3600".into(),
+        )));
+    }
+    let inserted = sqlx::query(
+        "INSERT INTO page_views (workspace_id, resource_id, page, seconds)
+         SELECT $1, r.id, $3, $4 FROM resources r WHERE r.id = $2 AND r.user_id = $5",
+    )
+    .bind(workspace)
+    .bind(req.resource_id)
+    .bind(req.page)
+    .bind(req.seconds)
+    .bind(user_id)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| HttpError(domain::errors::DomainError::Repository(e.to_string()).into()))?;
+    if inserted.rows_affected() == 0 {
+        return Err(HttpError(
+            domain::errors::DomainError::NotFound(format!("resource {}", req.resource_id)).into(),
+        ));
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// The intent in: stored as the next goal revision, and the run that
@@ -830,6 +874,115 @@ mod tests {
                 "The return G_t is defined as..."
             );
         }
+        runtime.close(ws.parse().unwrap()).await.unwrap();
+    }
+
+    /// Reading is a signal (21c): page stays reported by the page ride on
+    /// the next attempt's receipt to the coach, once, with the source's
+    /// title; a stay on someone else's source is refused and not written.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn what_the_learner_read_reaches_the_coach_with_the_attempt(pool: PgPool) {
+        let models = Calls::default();
+        let (app, runtime) = serve(
+            &pool,
+            scripted(models.clone(), vec![FIRST, ASSESS, FOLLOW_UP]),
+        )
+        .await;
+        let user = learner(&pool, "h@x.test").await;
+        let topic: Uuid =
+            sqlx::query_scalar("INSERT INTO topics (user_id, name) VALUES ($1, 'RL') RETURNING id")
+                .bind(user)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let book: Uuid = sqlx::query_scalar(
+            "INSERT INTO resources (user_id, topic_id, title, resource_type, content_pages)
+             VALUES ($1, $2, 'Sutton & Barto', 'pdf', '[\"a\",\"b\",\"c\"]') RETURNING id",
+        )
+        .bind(user)
+        .bind(topic)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let (_, current) = call(&app, "GET", "/api/workspaces/current", user, None).await;
+        let ws = current["id"].as_str().unwrap().to_string();
+        call(
+            &app,
+            "POST",
+            &format!("/api/workspaces/{ws}/goal"),
+            user,
+            Some(json!({ "intent": "Returns." })),
+        )
+        .await;
+        let first = settled(&app, user, &ws).await;
+        let activity = first["currentActivityId"].as_str().unwrap().to_string();
+
+        // The learner reads two pages, then answers.
+        for (page, seconds) in [(2, 95), (3, 40)] {
+            let (status, body) = call(
+                &app,
+                "POST",
+                &format!("/api/workspaces/{ws}/reading"),
+                user,
+                Some(json!({ "resourceId": book, "page": page, "seconds": seconds })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+        }
+        let other = learner(&pool, "i@x.test").await;
+        let (status, _) = call(
+            &app,
+            "POST",
+            &format!("/api/workspaces/{ws}/reading"),
+            other,
+            Some(json!({ "resourceId": book, "page": 1, "seconds": 5 })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "another learner's workspace");
+        let (status, _) = call(
+            &app,
+            "POST",
+            &format!("/api/workspaces/{ws}/reading"),
+            user,
+            Some(json!({ "resourceId": Uuid::new_v4(), "page": 1, "seconds": 5 })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "a source that is not theirs");
+
+        let revision = revision_of(&pool, &activity).await;
+        call(
+            &app,
+            "POST",
+            "/api/attempts",
+            user,
+            Some(json!({ "requestKey": "k", "activityRevisionId": revision, "response": "the discounted sum" })),
+        )
+        .await;
+        let second = settled(&app, user, &ws).await;
+        assert_eq!(second["operator"], "waiting", "{second}");
+
+        // The coach saw the reading with the attempt: in its request, and
+        // on the wait's receipt.
+        let reading = {
+            let models = models.lock().unwrap();
+            models[1].payload()[0][4][0][1][0][1]["reading"].clone()
+        };
+        assert_eq!(reading.as_array().map(Vec::len), Some(2), "{reading}");
+        assert_eq!(reading[0]["page"], 2);
+        assert_eq!(reading[0]["seconds"], 95);
+        assert_eq!(reading[0]["title"], "Sutton & Barto");
+        assert_eq!(reading[0]["resourceId"], book.to_string());
+        let (delivered, pending): (i64, i64) = sqlx::query_as(
+            "SELECT count(*) FILTER (WHERE delivered_at IS NOT NULL), count(*) FILTER (WHERE delivered_at IS NULL) FROM page_views",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            (delivered, pending),
+            (2, 0),
+            "delivered once, with the receipt"
+        );
         runtime.close(ws.parse().unwrap()).await.unwrap();
     }
 }
