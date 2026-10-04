@@ -10,6 +10,8 @@ interface SourcePassageProps {
   resourceId: string;
   /// 1-based.
   page: number;
+  /// The exact cited file, opened whole in a new tab.
+  openHref?: string;
   /// Test seam; the real one asks the backend for that one page.
   loadPage?: (resourceId: string, page: number) => Promise<string>;
 }
@@ -23,7 +25,7 @@ function pageImageUrl(resourceId: string, page: number): string {
   return `/api/resources/${resourceId}/pages/${page}/image`;
 }
 
-export function SourcePassage({ resourceId, page, loadPage = pageFromBackend }: SourcePassageProps) {
+export function SourcePassage({ resourceId, page, openHref, loadPage = pageFromBackend }: SourcePassageProps) {
   const [text, setText] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(true);
@@ -44,10 +46,15 @@ export function SourcePassage({ resourceId, page, loadPage = pageFromBackend }: 
   const asImage = imageReady && !showText;
 
   return (
-    <aside className="mb-6 rounded-lg border border-border bg-muted/40" data-testid="source-passage">
+    <aside className="rounded-lg border border-border bg-muted/40" data-testid="source-passage">
       <div className="flex items-center justify-between px-4 py-2 text-xs uppercase tracking-wide text-muted-foreground">
         <span>Source · p. {page}</span>
         <span className="flex gap-3">
+          {openHref && (
+            <a className="uppercase hover:text-foreground" href={openHref} target="_blank" rel="noreferrer">
+              open
+            </a>
+          )}
           {open && imageReady && (
             <button type="button" className="uppercase" onClick={() => setShowText((t) => !t)}>
               {showText ? "page" : "text"}
