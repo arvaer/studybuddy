@@ -18,6 +18,19 @@
 //! read, and reconcile (18c) completes any park whose receipt already
 //! exists. Reopen itself asks no provider.
 //!
+//! **A kill mid-think is resumed (20d).** A run interrupted at `call/model`
+//! or `learning/present`, by the process dying or by the adapter answering
+//! `unknown`, reopens as a park on that family with no receipt. Neither
+//! effect is unsafe to serve again under the same id: the model has no side
+//! effect outside the record, and `learning/present` commits its receipt
+//! with the publication, so no receipt means nothing landed, and a reply
+//! lost after the commit is answered from the receipt by the endpoint. So
+//! the first state read after reopen allows each such park again
+//! (`Interrupt(Allow)`, H3) and the think goes on where it stopped. Each
+//! park is allowed once per process: a second failure of the same park
+//! leaves it `stalled` until the next restart, so a broken model is not
+//! called on every page poll.
+//!
 //! Providers: the model as this process has it (`operator::Model`, or a
 //! test's scripted one) and `learning/present` as a client of this
 //! process's own effect endpoint over loopback (`operator::providers`).
@@ -27,7 +40,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use app::services::attempt::AttemptService;
-use capsule_corp::sdk::{Completed, Outcome, Park, Reply, Session};
+use capsule_corp::sdk::{Answer, Completed, Interrupt, Outcome, Park, Reply, Session};
 use capsule_host::owner::Handle;
 use infra::repositories::attempt::PgAttemptRepository;
 use infra::repositories::workspace::PgWorkspaceRepository;
@@ -70,6 +83,8 @@ pub struct OperatorRuntime {
     secret: Arc<str>,
     installer: Installer,
     thinking: Mutex<HashSet<Uuid>>,
+    /// Effect ids allowed again in this process after an interruption.
+    allowed: Mutex<HashSet<String>>,
 }
 
 impl OperatorRuntime {
@@ -94,6 +109,7 @@ impl OperatorRuntime {
             secret,
             installer,
             thinking: Mutex::new(HashSet::new()),
+            allowed: Mutex::new(HashSet::new()),
         }
     }
 
@@ -242,28 +258,76 @@ impl OperatorRuntime {
         Ok(owed)
     }
 
+    /// The workspace's parks interrupted mid-think: pending on a family
+    /// other than the learner's, with no receipt, and not yet allowed again
+    /// by this process. Marks nothing.
+    async fn interrupted(
+        &self,
+        workspace: Uuid,
+        handle: &Handle<Record>,
+    ) -> Result<Vec<Park>, OperatorError> {
+        let mut interrupted = Vec::new();
+        for park in handle.pending()? {
+            let allowed = self
+                .allowed
+                .lock()
+                .expect("allowed")
+                .contains(park.digest());
+            if park.family() == WAIT_FAMILY
+                || allowed
+                || receipts::find(&self.pool, workspace, park.digest())
+                    .await?
+                    .is_some()
+            {
+                continue;
+            }
+            interrupted.push(park);
+        }
+        Ok(interrupted)
+    }
+
     /// Settle what the workspace is owed, in the background: every pending
-    /// park with a receipt is completed from it (18c) and the run goes on.
+    /// park with a receipt is completed from it (18c), every park
+    /// interrupted mid-think is allowed again (20d), and the run goes on.
     /// Answers whether the workspace is now thinking.
     pub async fn poke(self: &Arc<Self>, workspace: Uuid) -> Result<bool, OperatorError> {
         if self.thinking.lock().expect("thinking").contains(&workspace) {
             return Ok(true);
         }
         let handle = self.open(workspace).await?;
-        if self.owed(workspace, &handle).await?.is_empty() {
+        if self.owed(workspace, &handle).await?.is_empty()
+            && self.interrupted(workspace, &handle).await?.is_empty()
+        {
             return Ok(false);
         }
         Ok(self.think(workspace, "settle", move |runtime| async move {
             let mut settled = Vec::new();
-            // A completion continues the run on the owner thread, for as
-            // long as a think takes, so it goes on a blocking task; and it
-            // may park on a new wait that already has an attempt, so go
-            // round until nothing is owed.
+            // A completion or an allow continues the run on the owner
+            // thread, for as long as a think takes, so it goes on a blocking
+            // task; and it may park on a new wait that already has an
+            // attempt, so go round until nothing is owed.
             for _ in 0..8 {
                 let handle = runtime.open(workspace).await?;
                 let owed = runtime.owed(workspace, &handle).await?;
-                if owed.is_empty() {
+                let interrupted = runtime.interrupted(workspace, &handle).await?;
+                if owed.is_empty() && interrupted.is_empty() {
                     break;
+                }
+                for park in interrupted {
+                    let (family, digest) = (park.family().to_string(), park.digest().to_string());
+                    runtime
+                        .allowed
+                        .lock()
+                        .expect("allowed")
+                        .insert(digest.clone());
+                    tracing::info!(workspace = %workspace, effect = %digest, family = %family, uncertain = park.uncertain().unwrap_or("killed"), "interrupted think allowed again");
+                    let handle = runtime.open(workspace).await?;
+                    let run = tokio::task::spawn_blocking(move || {
+                        handle.resolve(park, Answer::Interrupt(Interrupt::Allow))
+                    })
+                    .await
+                    .map_err(|_| OperatorError::Join)???;
+                    settled.push(format!("resumed {family}: {}", describe(run.outcome())));
                 }
                 for park in owed {
                     let Some(receipt) =
