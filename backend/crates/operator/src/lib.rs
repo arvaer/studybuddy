@@ -5,6 +5,7 @@
 pub mod capsule;
 pub mod host;
 pub mod model;
+pub mod providers;
 pub mod receipts;
 
 pub use host::{OperatorError, OperatorHost, Reconciled, Settled};

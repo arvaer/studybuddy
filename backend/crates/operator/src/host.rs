@@ -51,6 +51,10 @@ pub enum OperatorError {
     Join,
     #[error("run: {0}")]
     Run(#[from] RunError),
+    #[error("capsule: {0}")]
+    Compile(#[from] capsule_corp::sdk::CompileError),
+    #[error("instantiate: {0}")]
+    Instantiate(#[from] capsule_corp::sdk::InstantiateError),
 }
 
 /// A pending effect settled from its receipt on reconcile.

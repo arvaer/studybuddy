@@ -2,6 +2,7 @@ mod config;
 mod error;
 mod llm;
 mod routes;
+mod runtime;
 mod state;
 
 use axum::Router;
@@ -86,14 +87,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // The operator's effect endpoints (19a): served only with a secret,
-    // which the embedded owner's providers present over loopback.
-    let operator_secret = config.operator_secret.map(std::sync::Arc::from);
-    if operator_secret.is_some() {
-        tracing::info!("Operator effect endpoints served at /internal/effects");
-    } else {
-        tracing::info!("No OPERATOR_SECRET; /internal/effects answers 404");
-    }
+    // The operator's effect endpoints (19a): the bearer secret the embedded
+    // owner's providers present over loopback. Process-local, so one is
+    // drawn here when OPERATOR_SECRET is unset (20a).
+    let operator_secret: std::sync::Arc<str> = match config.operator_secret {
+        Some(secret) => {
+            tracing::info!("Operator effect endpoints served at /internal/effects with OPERATOR_SECRET");
+            secret.into()
+        }
+        None => {
+            tracing::info!("Operator effect endpoints served at /internal/effects with a per-process secret");
+            format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple()).into()
+        }
+    };
 
     // The operator's model (19b): the in-process Claude adapter, keyed by
     // ANTHROPIC_API_KEY as capsule-corp is. The key is never logged.
@@ -109,7 +115,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (capsule_name, capsule_address) = operator::capsule::check()?;
     tracing::info!(capsule = %capsule_name, definition = %capsule_address, "Learning capsule compiled");
 
+    // The operator at run time (20a): sessions on demand, the model as
+    // configured, publication through this process's own endpoint.
     let port = config.port;
+    let installer: runtime::Installer = {
+        let model = operator_model.clone();
+        std::sync::Arc::new(move |session: &mut capsule_corp::sdk::Session<operator::host::Record>| {
+            if let Some(model) = &model {
+                model.install(session);
+            }
+        })
+    };
+    let runtime = std::sync::Arc::new(runtime::OperatorRuntime::new(
+        pool.clone(),
+        config.database_url.clone(),
+        format!("http://127.0.0.1:{port}"),
+        std::sync::Arc::clone(&operator_secret),
+        installer,
+    ));
+    {
+        let runtime = std::sync::Arc::clone(&runtime);
+        tokio::spawn(async move {
+            let mut every = tokio::time::interval(std::time::Duration::from_secs(20));
+            loop {
+                every.tick().await;
+                if let Err(error) = runtime.renew_leases().await {
+                    tracing::warn!("lease renewal failed: {error}");
+                }
+            }
+        });
+    }
+
     let state = AppState {
         pool,
         jwt_secret: config.jwt_secret,
@@ -117,8 +153,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cookie_secure: config.cookie_secure,
         llm,
         auth_limiter: std::sync::Arc::new(app::services::rate_limit::AuthLimiter::new(config.auth_limits)),
-        operator_secret,
+        operator_secret: Some(operator_secret),
         operator_model,
+        runtime,
     };
 
     let app = Router::new()

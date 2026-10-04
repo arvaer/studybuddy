@@ -5,6 +5,7 @@ use std::sync::Arc;
 use app::services::rate_limit::AuthLimiter;
 
 use crate::llm::LlmClient;
+use crate::runtime::OperatorRuntime;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -22,4 +23,6 @@ pub struct AppState {
     /// The operator's model (19b): upstream's Claude adapter, installed on
     /// each session the owner opens. `None` without `ANTHROPIC_API_KEY`.
     pub operator_model: Option<operator::Model>,
+    /// This process's sessions and runs (20a).
+    pub runtime: Arc<OperatorRuntime>,
 }

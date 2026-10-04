@@ -16,6 +16,7 @@ mod resources;
 mod settings;
 mod study_sessions;
 mod topics;
+mod workspaces;
 
 use axum::Router;
 
@@ -41,6 +42,7 @@ pub fn router() -> Router<AppState> {
                 .merge(resources::router())
                 .merge(progress::router())
                 .merge(settings::router())
-                .merge(llm::router()),
+                .merge(llm::router())
+                .merge(workspaces::router()),
         )
 }

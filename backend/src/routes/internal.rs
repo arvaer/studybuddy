@@ -275,7 +275,23 @@ mod tests {
     const SECRET: &str = "operator-secret-for-tests";
     const JWT: &str = "jwt-secret-for-tests";
 
-    fn app(pool: PgPool, secret: Option<&str>) -> Router {
+    /// A runtime for tests: no model, the endpoint at a base URL nothing
+    /// listens on (these tests never start a run).
+    async fn runtime(pool: &PgPool, secret: &str) -> Arc<crate::runtime::OperatorRuntime> {
+        let (name,): (String,) = sqlx::query_as("SELECT current_database()").fetch_one(pool).await.unwrap();
+        let base = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+        let (prefix, _) = base.rsplit_once('/').expect("a database in DATABASE_URL");
+        Arc::new(crate::runtime::OperatorRuntime::new(
+            pool.clone(),
+            format!("{prefix}/{name}"),
+            "http://127.0.0.1:1",
+            Arc::from(secret),
+            Arc::new(|_: &mut capsule_corp::sdk::Session<operator::host::Record>| {}),
+        ))
+    }
+
+    async fn app(pool: PgPool, secret: Option<&str>) -> Router {
+        let runtime = runtime(&pool, secret.unwrap_or(SECRET)).await;
         let state = AppState {
             pool,
             jwt_secret: JWT.into(),
@@ -285,6 +301,7 @@ mod tests {
             auth_limiter: Arc::new(AuthLimiter::new(AuthLimits::default())),
             operator_secret: secret.map(Arc::from),
             operator_model: None,
+            runtime,
         };
         crate::routes::router().with_state(state)
     }
@@ -420,7 +437,7 @@ mod tests {
     async fn the_manual_route_and_the_endpoint_write_the_same_rows(pool: PgPool) {
         let user = learner(&pool, "owner@example.com").await;
         let ws = workspace(&pool, user).await;
-        let app = app(pool.clone(), Some(SECRET));
+        let app = app(pool.clone(), Some(SECRET)).await;
         let prompt = "What does the return G_t sum?";
 
         let (status, manual) = send(
@@ -464,7 +481,7 @@ mod tests {
     async fn a_replayed_effect_id_answers_the_receipt_and_writes_nothing(pool: PgPool) {
         let user = learner(&pool, "owner@example.com").await;
         let ws = workspace(&pool, user).await;
-        let app = app(pool.clone(), Some(SECRET));
+        let app = app(pool.clone(), Some(SECRET)).await;
         let path = format!("workspaces/{ws}/goal/1");
 
         let first = effect_body("sha256:present-1", &path, activity("First prompt"));
@@ -491,7 +508,7 @@ mod tests {
         let user = learner(&pool, "owner@example.com").await;
         let ws = workspace(&pool, user).await;
         let other = workspace(&pool, learner(&pool, "other@example.com").await).await;
-        let app = app(pool.clone(), Some(SECRET));
+        let app = app(pool.clone(), Some(SECRET)).await;
         let body = effect_body(
             "sha256:present-1",
             &format!("workspaces/{ws}/goal/1"),
@@ -536,7 +553,7 @@ mod tests {
         assert_eq!(status, StatusCode::NOT_FOUND);
         let (status, _) = send(&app, post(&effect_uri(Uuid::new_v4()), Some(SECRET), &body)).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
-        let unmounted = self::app(pool.clone(), None);
+        let unmounted = self::app(pool.clone(), None).await;
         let (status, _) = send(&unmounted, post(&effect_uri(ws), Some(SECRET), &body)).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
 
@@ -547,7 +564,7 @@ mod tests {
     async fn a_refused_activity_leaves_no_receipt(pool: PgPool) {
         let user = learner(&pool, "owner@example.com").await;
         let ws = workspace(&pool, user).await;
-        let app = app(pool.clone(), Some(SECRET));
+        let app = app(pool.clone(), Some(SECRET)).await;
         let path = format!("workspaces/{ws}/goal/1");
 
         // Invalid content, and a kind the domain has no name for: both

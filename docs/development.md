@@ -45,7 +45,7 @@ Configuration is read once at startup by `backend/src/config.rs`, which is the s
 | `LLM_BASE_URL` | no | `https://api.anthropic.com` or `https://api.openai.com`; its host must be in `LLM_ALLOWED_HOSTS` |
 | `LLM_ALLOWED_HOSTS` | no | `api.anthropic.com,api.openai.com`; the only hosts the backend will call. For Ollama: `localhost` with `LLM_BASE_URL=http://localhost:11434` |
 | `LLM_TIMEOUT_SECS` | no | `30` (1..=600) |
-| `OPERATOR_SECRET` | no | unset means the operator's effect endpoints under `/internal/effects` answer 404. At least 16 characters; the bearer secret the embedded owner presents over loopback, never a learner's token (19a) |
+| `OPERATOR_SECRET` | no | a per-process secret is drawn when unset (20a). At least 16 characters; the bearer secret the embedded owner presents to `/internal/effects` over loopback, never a learner's token (19a). Set it only when something outside this process must call the endpoints |
 | `ANTHROPIC_API_KEY` | no | unset means the operator cannot think. The key capsule-corp reads, for the operator's in-process Claude adapter (19b); never logged |
 | `OPERATOR_MODEL` | no | `claude-opus-5-5`, the launcher's default; the model the adapter asks |
 
