@@ -7,9 +7,13 @@
 #
 # Needs ANTHROPIC_API_KEY in backend/.env (the backend reads it; this script
 # never does) and the disposable database from scripts/dev-db.sh unless
-# DATABASE_URL is set. One throwaway learner with a random email. Nothing is
-# deleted; the rows it creates stay in the development database. Every model
-# call is billed to the key, about five per run.
+# DATABASE_URL is set. The learner is demo@demo.test with password demodemo
+# (DEMO_EMAIL, DEMO_PASSWORD), signed up on first use, so you can open the
+# frontend afterwards and see what the run built. A workspace takes one goal,
+# so when that account already has one the run uses demo+<n>@demo.test with
+# the same password and says so. Nothing is deleted; the rows it creates stay
+# in the development database. Every model call is billed to the key, about
+# five per run.
 #
 # Steps:
 #   1. intent in; the first activity lands
@@ -65,7 +69,11 @@ api() { # method path token [json-body]
   fi
   printf %s "$out" >"$work/code"; cat "$work/body"
 }
-login() { api POST /api/auth/login "" "{\"email\":\"$1\",\"password\":\"gate-demo-pass\"}" | jq -r .accessToken; }
+DEMO_EMAIL="${DEMO_EMAIL:-demo@demo.test}"; DEMO_PASSWORD="${DEMO_PASSWORD:-demodemo}"
+login() { api POST /api/auth/login "" "$(jq -nc --arg e "$1" --arg p "$DEMO_PASSWORD" '{email:$e,password:$p}')" | jq -r .accessToken; }
+signup() { api POST /api/auth/signup "" "$(jq -nc --arg e "$1" --arg p "$DEMO_PASSWORD" '{email:$e,password:$p,displayName:"Demo learner"}')" | jq -r .accessToken; }
+# The demo account, or an existing one's token; null when the login fails.
+sign_in() { local t; t="$(signup "$1")"; [ "$t" != null ] && [ -n "$t" ] && { printf %s "$t"; return; }; login "$1"; }
 workspace() { api GET "/api/workspaces/$WS" "$A"; }
 # Poll the workspace until the operator is neither thinking nor unreachable
 # (a just-restarted process may find the dead one's lease still held).
@@ -90,11 +98,20 @@ revision_of() { api GET "/api/activities/$1" "$A" | jq -r .current.id; }
 prompt_of() { api GET "/api/activities/$1" "$A" | jq -r .current.prompt; }
 settled_log_lines() { grep -c "operator settled" "$work/backend.log" || true; }
 
-run="$(date +%s)-$RANDOM"
-A_EMAIL="operator-$run@example.test"
-A="$(api POST /api/auth/signup "" "{\"email\":\"$A_EMAIL\",\"password\":\"gate-demo-pass\",\"displayName\":\"Learner\"}" | jq -r .accessToken)"
-[ "$A" != null ] && [ -n "$A" ] || { echo "signup failed"; cat "$work/body"; exit 1; }
+A_EMAIL="$DEMO_EMAIL"
+A="$(sign_in "$A_EMAIL")"
+[ "$A" != null ] && [ -n "$A" ] || { echo "could not sign in as $A_EMAIL (is DEMO_PASSWORD the one it was made with?)"; cat "$work/body"; exit 1; }
 WS="$(api GET /api/workspaces/current "$A" | jq -r .id)"
+if [ "$(api GET "/api/workspaces/$WS" "$A" | jq -r '.goal != null')" = true ]; then
+  n=1; while :; do
+    A_EMAIL="${DEMO_EMAIL%%@*}+$n@${DEMO_EMAIL#*@}"
+    A="$(sign_in "$A_EMAIL")"; [ "$A" != null ] && [ -n "$A" ] || { echo "could not sign in as $A_EMAIL"; exit 1; }
+    WS="$(api GET /api/workspaces/current "$A" | jq -r .id)"
+    [ "$(api GET "/api/workspaces/$WS" "$A" | jq -r '.goal != null')" = true ] || break
+    n=$((n + 1))
+  done
+  note "$DEMO_EMAIL already has its goal; this run is $A_EMAIL (same password)"
+fi
 
 # ---- 1. intent in; the first activity lands ---------------------------------
 intent="Understand the return and discounting in reinforcement learning."
@@ -159,4 +176,4 @@ check 4 "the operator went on from where it left off ($(waited)s): $(jq -r '.ope
   test "$(jq -r .operator <<<"$fourth")" != stalled
 
 echo
-if [ "$fail" = 0 ]; then echo "GATE 2: all steps passed  (learner $A_EMAIL, workspace $WS, log $work/backend.log)"; else echo "GATE 2: FAILED  (see above; backend log $work/backend.log)"; exit 1; fi
+if [ "$fail" = 0 ]; then echo "GATE 2: all steps passed  (sign in as $A_EMAIL / $DEMO_PASSWORD; workspace $WS; log $work/backend.log)"; else echo "GATE 2: FAILED  (see above; backend log $work/backend.log)"; exit 1; fi

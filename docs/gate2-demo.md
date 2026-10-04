@@ -9,7 +9,7 @@ scripts/dev-db.sh up            # disposable database; nothing else is touched
 scripts/operator-demo.sh        # builds, starts a backend on :3200, runs the four steps, stops it
 ```
 
-One throwaway learner with a random email. About five model calls, billed to the key. Rows stay in the development database; nothing is deleted. The script prints one `PASS`/`FAIL` line per check and the prompt the operator published at each step, and names the backend log at the end.
+The learner is `demo@demo.test` with password `demodemo` (`DEMO_EMAIL`, `DEMO_PASSWORD`), signed up on first use, so the frontend can be opened on that account afterwards to see what the run built. A workspace takes one goal, so a later run on a database where that account already has one uses `demo+1@demo.test`, then `+2`, with the same password, and prints which. About five model calls, billed to the key. Rows stay in the development database; nothing is deleted. The script prints one `PASS`/`FAIL` line per check and the prompt the operator published at each step, and names the backend log at the end.
 
 ## The run
 
