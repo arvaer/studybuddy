@@ -27,6 +27,13 @@ const STATUS_LABEL: Record<AttemptStatus, string> = {
   pending: "Recorded, awaiting assessment",
 };
 
+/// The quoted passage of a cited page, when the coach gave one (#57).
+function passageOf(location: Revision["sourceLocation"]) {
+  if (typeof location?.quote !== "string") return undefined;
+  const at = (v: unknown) => (typeof v === "number" ? v : undefined);
+  return { quote: location.quote, start: at(location.start), end: at(location.end) };
+}
+
 /// One revision, answered through the backend (#13). What the learner sees
 /// is exactly one of: restoring, a draft to edit, submitting, the accepted
 /// receipt, or a failure with a retry that resends the same request key.
@@ -57,6 +64,7 @@ export function ActivityCard({ revision, onAccepted, deps, loadPage, hintClient 
             <SourcePassage
               resourceId={revision.sourceResourceId}
               page={revision.sourceLocation.page}
+              passage={passageOf(revision.sourceLocation)}
               openHref={sourceHref}
               loadPage={loadPage}
             />

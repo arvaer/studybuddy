@@ -270,12 +270,19 @@ async fn get_file(
 /// page stays sharp on a high-density screen.
 const PAGE_IMAGE_WIDTH: u16 = 1600;
 
+#[derive(Deserialize)]
+struct PageImageQuery {
+    /// A passage quoted from the page, marked where it is found (#57).
+    highlight: Option<String>,
+}
+
 /// One page of an owned PDF as a PNG (`page` is 1-based), so an activity
 /// card shows the page as printed without fetching the whole file.
 async fn get_page_image(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path((id, page)): Path<(Uuid, usize)>,
+    Query(PageImageQuery { highlight }): Query<PageImageQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
     let not_found = || {
         HttpError(AppError::Domain(domain::errors::DomainError::NotFound(
@@ -292,7 +299,7 @@ async fn get_page_image(
         .await
         .map_err(|e| HttpError(AppError::Unexpected(format!("read file: {e}"))))?;
     let png = tokio::task::spawn_blocking(move || {
-        infra::pdf::render_page_png(&bytes, index, PAGE_IMAGE_WIDTH)
+        infra::pdf::render_page_png(&bytes, index, PAGE_IMAGE_WIDTH, highlight.as_deref())
     })
     .await
     .map_err(|e| HttpError(AppError::Unexpected(format!("render page: {e}"))))?

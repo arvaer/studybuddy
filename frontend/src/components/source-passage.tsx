@@ -10,6 +10,9 @@ interface SourcePassageProps {
   resourceId: string;
   /// 1-based.
   page: number;
+  /// The passage the activity is about (#57): marked on the drawn page,
+  /// and between `start` and `end` (chars of the page text) in the text.
+  passage?: { quote: string; start?: number; end?: number };
   /// The exact cited file, opened whole in a new tab.
   openHref?: string;
   /// Test seam; the real one asks the backend for that one page.
@@ -21,11 +24,25 @@ async function pageFromBackend(resourceId: string, page: number): Promise<string
   return pages[0] ?? "";
 }
 
-function pageImageUrl(resourceId: string, page: number): string {
-  return `/api/resources/${resourceId}/pages/${page}/image`;
+function pageImageUrl(resourceId: string, page: number, quote?: string): string {
+  const base = `/api/resources/${resourceId}/pages/${page}/image`;
+  return quote ? `${base}?highlight=${encodeURIComponent(quote)}` : base;
 }
 
-export function SourcePassage({ resourceId, page, openHref, loadPage = pageFromBackend }: SourcePassageProps) {
+/// The page text with the passage wrapped in <mark>, by char position.
+function MarkedText({ text, start, end }: { text: string; start?: number; end?: number }) {
+  if (start === undefined || end === undefined) return <>{text}</>;
+  const chars = Array.from(text);
+  return (
+    <>
+      {chars.slice(0, start).join("")}
+      <mark className="rounded-sm bg-yellow-200/80 text-inherit">{chars.slice(start, end).join("")}</mark>
+      {chars.slice(end).join("")}
+    </>
+  );
+}
+
+export function SourcePassage({ resourceId, page, passage, openHref, loadPage = pageFromBackend }: SourcePassageProps) {
   const [text, setText] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(true);
@@ -69,14 +86,14 @@ export function SourcePassage({ resourceId, page, openHref, loadPage = pageFromB
         <div className="px-4 pb-4 max-h-[70vh] overflow-y-auto">
           {/* Loads while hidden; replaces the text once it has arrived. */}
           <img
-            src={pageImageUrl(resourceId, page)}
+            src={pageImageUrl(resourceId, page, passage?.quote)}
             alt={`Page ${page} of the source`}
             className={asImage ? "w-full rounded border border-border bg-white" : "hidden"}
             onLoad={() => setImageReady(true)}
           />
           {!asImage && (
             <div className="text-sm leading-relaxed whitespace-pre-wrap text-foreground/90">
-              {failed ? <span className="text-muted-foreground">The page could not be loaded.</span> : text === null ? <span className="text-muted-foreground">Loading the page…</span> : text}
+              {failed ? <span className="text-muted-foreground">The page could not be loaded.</span> : text === null ? <span className="text-muted-foreground">Loading the page…</span> : <MarkedText text={text} start={passage?.start} end={passage?.end} />}
             </div>
           )}
         </div>

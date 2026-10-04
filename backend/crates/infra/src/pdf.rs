@@ -66,17 +66,27 @@ pub fn extract_text_by_pages(bytes: &[u8]) -> Vec<String> {
 }
 
 /// Page `index` (0-based) drawn `width` pixels wide, its blank margins cut
-/// away, as a PNG. `None` when
-/// the library is missing, the file does not parse, or there is no such page.
-pub fn render_page_png(bytes: &[u8], index: usize, width: u16) -> Option<Vec<u8>> {
+/// away, as a PNG; `highlight`, a passage quoted from the page (#57), is
+/// marked where it is found. `None` when the library is missing, the file
+/// does not parse, or there is no such page.
+pub fn render_page_png(
+    bytes: &[u8],
+    index: usize,
+    width: u16,
+    highlight: Option<&str>,
+) -> Option<Vec<u8>> {
     let pdfium = pdfium()?;
     let document = pdfium.load_pdf_from_byte_slice(bytes, None).ok()?;
     let page = document.pages().get(i32::try_from(index).ok()?).ok()?;
-    let bitmap = page
-        .render_with_config(&PdfRenderConfig::new().set_target_width(width as Pixels))
-        .ok()?;
+    let config = PdfRenderConfig::new().set_target_width(width as Pixels);
+    let bitmap = page.render_with_config(&config).ok()?;
     let (w, h) = (bitmap.width() as usize, bitmap.height() as usize);
-    let rgba = bitmap.as_rgba_bytes();
+    let mut rgba = bitmap.as_rgba_bytes();
+    if let Some(quote) = highlight {
+        for (x0, y0, x1, y1) in passage_boxes(&page, &config, quote) {
+            mark(&mut rgba, w, h, (x0, y0, x1, y1));
+        }
+    }
     let (x0, y0, x1, y1) = ink_bounds(&rgba, w, h);
     // Pages are opaque; RGB is a quarter smaller than RGBA.
     let mut rgb = Vec::with_capacity((x1 - x0) * (y1 - y0) * 3);
@@ -91,6 +101,59 @@ pub fn render_page_png(bytes: &[u8], index: usize, width: u16) -> Option<Vec<u8>
     encoder.set_compression(png::Compression::Balanced);
     encoder.write_header().ok()?.write_image_data(&rgb).ok()?;
     Some(out)
+}
+
+/// Pixel boxes of the characters of `quote` on `page`, found the way the
+/// effect endpoint finds it in the stored text (`domain::source_span`), but
+/// over PDFium's own characters, whose positions are what is drawn.
+fn passage_boxes(
+    page: &PdfPage,
+    config: &PdfRenderConfig,
+    quote: &str,
+) -> Vec<(i32, i32, i32, i32)> {
+    let Ok(text) = page.text() else {
+        return Vec::new();
+    };
+    let chars = text.chars();
+    let all: String = (0..chars.len())
+        .map(|i| {
+            chars
+                .get(i)
+                .ok()
+                .and_then(|c| c.unicode_char())
+                .unwrap_or(' ')
+        })
+        .collect();
+    let Some((start, end)) = domain::source_span::locate(&all, quote) else {
+        return Vec::new();
+    };
+    (start..end)
+        .filter_map(|i| {
+            let rect = chars.get(i).ok()?.loose_bounds().ok()?;
+            let (x0, y0) = page
+                .points_to_pixels(rect.left(), rect.top(), config)
+                .ok()?;
+            let (x1, y1) = page
+                .points_to_pixels(rect.right(), rect.bottom(), config)
+                .ok()?;
+            Some((x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1)))
+        })
+        .collect()
+}
+
+/// Tint a box the way a highlighter does: multiply by yellow, so the ink
+/// on it stays dark.
+fn mark(rgba: &mut [u8], w: usize, h: usize, (x0, y0, x1, y1): (i32, i32, i32, i32)) {
+    const YELLOW: [u16; 3] = [255, 236, 120];
+    let clamp = |v: i32, max: usize| v.clamp(0, max as i32) as usize;
+    for y in clamp(y0, h)..clamp(y1, h) {
+        for x in clamp(x0, w)..clamp(x1, w) {
+            let px = &mut rgba[(y * w + x) * 4..][..3];
+            for (c, k) in px.iter_mut().zip(YELLOW) {
+                *c = (*c as u16 * k / 255) as u8;
+            }
+        }
+    }
 }
 
 /// The part of a page that has anything on it, plus a margin: the white
@@ -141,7 +204,7 @@ mod tests {
             eprintln!("skipped: PDFium not found (scripts/fetch-pdfium.sh)");
             return;
         }
-        let png = render_page_png(HELLO, 0, 400).expect("page 1 renders");
+        let png = render_page_png(HELLO, 0, 400, None).expect("page 1 renders");
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
         // IHDR width and height, right after the signature and chunk header:
         // the one line of text keeps some width, the blank page below it goes.
@@ -149,8 +212,24 @@ mod tests {
         let height = u32::from_be_bytes(png[20..24].try_into().unwrap());
         assert!(width > 64 && width <= 400, "{width}");
         assert!(height < 200, "{height}");
-        assert!(render_page_png(HELLO, 1, 400).is_none(), "no second page");
-        assert!(render_page_png(b"not a pdf", 0, 400).is_none());
+        assert!(
+            render_page_png(HELLO, 1, 400, None).is_none(),
+            "no second page"
+        );
+        assert!(render_page_png(b"not a pdf", 0, 400, None).is_none());
+    }
+
+    #[test]
+    fn a_quoted_passage_is_marked_and_an_absent_one_is_not() {
+        if !available() {
+            eprintln!("skipped: PDFium not found (scripts/fetch-pdfium.sh)");
+            return;
+        }
+        let plain = render_page_png(HELLO, 0, 400, None).unwrap();
+        let marked = render_page_png(HELLO, 0, 400, Some("Hello from StudyBuddy")).unwrap();
+        let absent = render_page_png(HELLO, 0, 400, Some("a sentence not on the page")).unwrap();
+        assert_ne!(plain, marked, "the passage changes the picture");
+        assert_eq!(plain, absent, "a quote not found draws nothing");
     }
 
     #[test]

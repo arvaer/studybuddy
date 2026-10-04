@@ -244,6 +244,19 @@ describe("ActivityCard", () => {
     expect(container.querySelector("[data-testid=source-passage]")).toBeNull();
   });
 
+  it("marks the quoted passage on the drawn page and in the text", async () => {
+    const page = "Intro. The Markov property is a restriction on the state, not the process.";
+    const quote = "The Markov property is a restriction on the state";
+    const cited = {
+      ...revision, id: "rev-p", options: null, hasAnswerKey: false, sourceResourceId: "res-1",
+      sourceLocation: { page: 58, quote, start: 7, end: 7 + quote.length },
+    };
+    render(<ActivityCard revision={cited} deps={{ storage: memoryStorage(), client: client() }} loadPage={async () => page} />);
+    const img = screen.getByAltText("Page 58 of the source") as HTMLImageElement;
+    expect(img.getAttribute("src")).toBe(`/api/resources/res-1/pages/58/image?highlight=${encodeURIComponent(quote)}`);
+    await waitFor(() => expect(screen.getByText(quote).tagName).toBe("MARK"));
+  });
+
   it("asks the coach for a hint, shows it, and records it as assistance", async () => {
     vi.useFakeTimers();
     try {

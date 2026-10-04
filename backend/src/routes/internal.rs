@@ -45,7 +45,9 @@ use app::dtos::activity::{CreateActivityRequest, RevisionContentRequest};
 use app::errors::AppError;
 use app::services::activity::ActivityService;
 use domain::errors::DomainError;
+use domain::repository_traits::ResourceRepository;
 use infra::repositories::activity::PgActivityRepository;
+use infra::repositories::resource::PgResourceRepository;
 use operator::receipts::{self, Receipt, Recorded};
 
 use crate::state::AppState;
@@ -477,7 +479,9 @@ async fn assess(
 
 /// `[path, kind, prompt, answer-key]`, as the learning capsule spells it
 /// (`backend/capsules/learning.capsule`, `coach/present`), or with
-/// `resource-id, page` appended (`coach/present-from`, 21b): the scope path
+/// `resource-id, page` appended (`coach/present-from`, 21b), and since #57
+/// a `quote` after them, the passage of that page the activity is about
+/// (six-element calls from earlier records still read): the scope path
 /// the environment checked, a string or the segment list the kernel read it
 /// from; then the activity's kind, its prompt and the answer the model
 /// expects (`null` for none), and the page of the learner's source it
@@ -487,11 +491,14 @@ fn parse_present(workspace: Uuid, payload: &[Value]) -> Result<CreateActivityReq
     let (path, kind, prompt, answer_key, citation) = match payload {
         [path, kind, prompt, answer_key] => (path, kind, prompt, answer_key, None),
         [path, kind, prompt, answer_key, resource, page] => {
-            (path, kind, prompt, answer_key, Some((resource, page)))
+            (path, kind, prompt, answer_key, Some((resource, page, None)))
+        }
+        [path, kind, prompt, answer_key, resource, page, quote] => {
+            (path, kind, prompt, answer_key, Some((resource, page, Some(quote))))
         }
         _ => {
             return Err(refused(format!(
-                "{PRESENT_FAMILY} takes [path kind prompt answer-key] or [path kind prompt answer-key resource-id page]"
+                "{PRESENT_FAMILY} takes [path kind prompt answer-key], optionally followed by resource-id page [quote]"
             )))
         }
     };
@@ -500,7 +507,7 @@ fn parse_present(workspace: Uuid, payload: &[Value]) -> Result<CreateActivityReq
     // comes from, shown beside the prompt. Ownership is the service's check.
     let (source_resource_id, source_location) = match citation {
         None => (None, None),
-        Some((resource, page)) => {
+        Some((resource, page, quote)) => {
             let Some(resource) = resource.as_str().and_then(|r| r.parse::<Uuid>().ok()) else {
                 return Err(refused(
                     "resource-id must be the id of one of the learner's sources",
@@ -509,7 +516,14 @@ fn parse_present(workspace: Uuid, payload: &[Value]) -> Result<CreateActivityReq
             let Some(page) = page.as_u64().filter(|p| *p >= 1) else {
                 return Err(refused("page must be a page number, 1-based"));
             };
-            (Some(resource), Some(json!({ "page": page })))
+            let mut location = json!({ "page": page });
+            if let Some(quote) = quote {
+                let Some(quote) = quote.as_str() else {
+                    return Err(refused("quote must be a string"));
+                };
+                location["quote"] = json!(quote);
+            }
+            (Some(resource), Some(location))
         }
     };
     let Some(kind) = kind.as_str() else {
@@ -532,6 +546,36 @@ fn parse_present(workspace: Uuid, payload: &[Value]) -> Result<CreateActivityReq
     })
 }
 
+/// Where on the cited page the quoted passage is (#57): `start` and `end`
+/// in `char`s of the page's extracted text, beside the quote, so the card
+/// can mark it. A quote that is not found leaves the page cited without a
+/// span; whether the resource is the learner's is the service's check.
+async fn place_quote(state: &AppState, owner: Uuid, activity: &mut CreateActivityRequest) {
+    let revision = &mut activity.revision;
+    let (Some(resource), Some(location)) = (
+        revision.source_resource_id,
+        revision.source_location.as_mut(),
+    ) else {
+        return;
+    };
+    let (Some(page), Some(quote)) = (
+        location["page"].as_u64(),
+        location["quote"].as_str().map(str::to_owned),
+    ) else {
+        return;
+    };
+    let page = page as usize;
+    let text = PgResourceRepository::new(state.pool.clone())
+        .get_pages(resource, owner, page - 1, page)
+        .await
+        .ok()
+        .and_then(|pages| pages.into_iter().next());
+    if let Some((start, end)) = text.and_then(|t| domain::source_span::locate(&t, &quote)) {
+        location["start"] = json!(start);
+        location["end"] = json!(end);
+    }
+}
+
 /// Everything after authorization, on one transaction: look up the receipt,
 /// else perform through the service and write the receipt, then commit.
 async fn present(
@@ -550,7 +594,8 @@ async fn present(
         return Ok(value(receipt.payload));
     }
 
-    let activity = parse_present(workspace, &req.payload)?;
+    let mut activity = parse_present(workspace, &req.payload)?;
+    place_quote(state, owner, &mut activity).await;
     let created = {
         let svc = ActivityService::new(PgActivityRepository::held(&mut tx));
         svc.create(owner, activity).await.map_err(application)?
@@ -1063,6 +1108,41 @@ mod tests {
         let (_, denied) = send(&app, post(&effect_uri(ws), Some(SECRET), &foreign)).await;
         assert!(denied["refused"].is_string(), "{denied}");
         assert_eq!(counts(&pool).await, (1, 1, 1));
+    }
+
+    /// A quote after the page (#57) is placed on it: the location carries
+    /// the quote and where it starts and ends in the page's text; a quote
+    /// not on the page still cites the page, without a span.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn a_quoted_passage_is_placed_on_the_cited_page(pool: PgPool) {
+        let user = learner(&pool, "owner@example.com").await;
+        let ws = workspace(&pool, user).await;
+        let app = app(pool.clone(), Some(SECRET)).await;
+        let path = format!("workspaces/{ws}/activities");
+        let page2 = "Policies.\nThe value of a state is the ex-\npected return starting from it.";
+        let book = source(&pool, user, "RL book", vec!["p1".into(), page2.into()]).await;
+
+        let quoted = json!({ "id": "sha256:q1", "capability": PRESENT_FAMILY,
+            "payload": [path, "recall", "What is a state's value?", "Its expected return.",
+                        book.to_string(), 2, "the value of a state is the expected return"] });
+        let (status, reply) = send(&app, post(&effect_uri(ws), Some(SECRET), &quoted)).await;
+        assert_eq!(status, StatusCode::OK, "{reply}");
+        let location = &reply["value"]["current"]["sourceLocation"];
+        assert_eq!(location["page"], 2);
+        let (start, end) = (
+            location["start"].as_u64().unwrap() as usize,
+            location["end"].as_u64().unwrap() as usize,
+        );
+        let marked: String = page2.chars().skip(start).take(end - start).collect();
+        assert_eq!(marked, "The value of a state is the ex-\npected return");
+
+        let elsewhere = json!({ "id": "sha256:q2", "capability": PRESENT_FAMILY,
+            "payload": [path, "recall", "q", "a", book.to_string(), 2, "a sentence that is not on this page"] });
+        let (_, reply) = send(&app, post(&effect_uri(ws), Some(SECRET), &elsewhere)).await;
+        assert_eq!(
+            reply["value"]["current"]["sourceLocation"],
+            json!({ "page": 2, "quote": "a sentence that is not on this page" })
+        );
     }
 
     #[sqlx::test(migrations = "./migrations")]
