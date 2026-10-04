@@ -18,6 +18,8 @@ describe("operator line", () => {
   it("names each phase and polls only while thinking", () => {
     expect(operatorLine({ ...base, operator: "thinking" })).toMatch(/thinking/);
     expect(operatorLine({ ...base, operator: "waiting", currentActivityId: "a1" })).toMatch(/your answer/);
+    expect(operatorLine({ ...base, operator: "unavailable", why: "leased" })).toMatch(/coming back/);
+    expect(shouldPoll({ ...base, operator: "unavailable" })).toBe(true);
     expect(operatorLine({ ...base, operator: "stalled", families: ["call/model"] })).toContain("call/model");
     expect(operatorLine({ ...base, operator: "idle", last: "done: [\"done\",\"ok\"]" })).toContain("done");
     expect(shouldPoll({ ...base, operator: "thinking" })).toBe(true);

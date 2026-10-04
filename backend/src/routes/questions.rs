@@ -1,9 +1,8 @@
 use axum::{
-    Router,
     extract::{Query, State},
     response::IntoResponse,
     routing::get,
-    Json,
+    Json, Router,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -16,8 +15,7 @@ use crate::routes::extractor::AuthUser;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/questions", get(list))
+    Router::new().route("/questions", get(list))
 }
 
 #[derive(Deserialize)]
@@ -39,7 +37,13 @@ async fn list(
 ) -> Result<impl IntoResponse, HttpError> {
     let svc = QuestionService::new(PgQuestionRepository::new(state.pool));
     Ok(Json(
-        svc.list(user_id, q.ru_id, q.concept_id, q.topic_id, q.question_type.as_deref())
-            .await?,
+        svc.list(
+            user_id,
+            q.ru_id,
+            q.concept_id,
+            q.topic_id,
+            q.question_type.as_deref(),
+        )
+        .await?,
     ))
 }

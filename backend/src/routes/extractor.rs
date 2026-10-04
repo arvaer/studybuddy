@@ -5,7 +5,7 @@ use axum::{
     Json,
 };
 use axum_extra::extract::CookieJar;
-use jsonwebtoken::{DecodingKey, Validation, decode};
+use jsonwebtoken::{decode, DecodingKey, Validation};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -51,7 +51,7 @@ fn extract_raw_token(parts: &Parts) -> Result<String, AuthError> {
 }
 
 fn verify_token(token: &str, secret: &str) -> Result<Uuid, AuthError> {
-    let key  = DecodingKey::from_secret(secret.as_bytes());
+    let key = DecodingKey::from_secret(secret.as_bytes());
     let data = decode::<TokenClaims>(token, &key, &Validation::default())
         .map_err(|_| AuthError::InvalidToken)?;
 

@@ -29,7 +29,10 @@ fn svc(state: AppState) -> ActivityService<PgActivityRepository> {
     ActivityService::new(PgActivityRepository::new(state.pool))
 }
 
-async fn list(State(state): State<AppState>, AuthUser(user_id): AuthUser) -> Result<impl IntoResponse, HttpError> {
+async fn list(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+) -> Result<impl IntoResponse, HttpError> {
     Ok(Json(svc(state).list(user_id).await?))
 }
 
@@ -46,7 +49,10 @@ async fn create(
     AuthUser(user_id): AuthUser,
     Json(req): Json<CreateActivityRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
-    Ok((StatusCode::CREATED, Json(svc(state).create(user_id, req).await?)))
+    Ok((
+        StatusCode::CREATED,
+        Json(svc(state).create(user_id, req).await?),
+    ))
 }
 
 async fn revise(
@@ -55,7 +61,10 @@ async fn revise(
     Path(id): Path<Uuid>,
     Json(req): Json<RevisionContentRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
-    Ok((StatusCode::CREATED, Json(svc(state).revise(user_id, id, req).await?)))
+    Ok((
+        StatusCode::CREATED,
+        Json(svc(state).revise(user_id, id, req).await?),
+    ))
 }
 
 async fn get_revision(

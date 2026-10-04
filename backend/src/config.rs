@@ -94,8 +94,14 @@ impl fmt::Debug for Config {
             .field("cookie_secure", &self.cookie_secure)
             .field("llm", &self.llm)
             .field("auth_limits", &self.auth_limits)
-            .field("operator_secret", &self.operator_secret.as_ref().map(|_| "<redacted>"))
-            .field("anthropic_api_key", &self.anthropic_api_key.as_ref().map(|_| "<redacted>"))
+            .field(
+                "operator_secret",
+                &self.operator_secret.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "anthropic_api_key",
+                &self.anthropic_api_key.as_ref().map(|_| "<redacted>"),
+            )
             .field("operator_model", &self.operator_model)
             .finish()
     }
@@ -145,7 +151,12 @@ impl Config {
             Some(v) => match v.trim().to_ascii_lowercase().as_str() {
                 "true" | "1" | "yes" => true,
                 "false" | "0" | "no" => false,
-                _ => return Err(ConfigError::Invalid("COOKIE_SECURE", "expected true or false")),
+                _ => {
+                    return Err(ConfigError::Invalid(
+                        "COOKIE_SECURE",
+                        "expected true or false",
+                    ))
+                }
             },
         };
 
@@ -159,7 +170,10 @@ impl Config {
         let operator_secret = match get("OPERATOR_SECRET") {
             None => None,
             Some(s) if s.len() < 16 => {
-                return Err(ConfigError::Invalid("OPERATOR_SECRET", "at least 16 characters"));
+                return Err(ConfigError::Invalid(
+                    "OPERATOR_SECRET",
+                    "at least 16 characters",
+                ));
             }
             Some(s) => Some(s),
         };
@@ -194,7 +208,10 @@ impl Config {
                     .parse::<u64>()
                     .ok()
                     .filter(|n| *n >= 1)
-                    .ok_or(ConfigError::Invalid(name, "expected a whole number of at least 1")),
+                    .ok_or(ConfigError::Invalid(
+                        name,
+                        "expected a whole number of at least 1",
+                    )),
             }
         };
         let per_ip = positive("AUTH_RATE_LIMIT_PER_IP", defaults.per_ip as u64)?;
@@ -204,9 +221,9 @@ impl Config {
             u32::try_from(n).map_err(|_| ConfigError::Invalid(name, "too large"))
         };
         Ok(AuthLimits {
-            per_ip:    clamp("AUTH_RATE_LIMIT_PER_IP", per_ip)?,
+            per_ip: clamp("AUTH_RATE_LIMIT_PER_IP", per_ip)?,
             per_email: clamp("AUTH_RATE_LIMIT_PER_EMAIL", per_email)?,
-            window:    Duration::from_secs(window),
+            window: Duration::from_secs(window),
         })
     }
 
@@ -214,8 +231,10 @@ impl Config {
         get: &impl Fn(&str) -> Option<String>,
         provider_name: &str,
     ) -> Result<LlmSettings, ConfigError> {
-        let provider = LlmProvider::parse(provider_name)
-            .ok_or(ConfigError::Invalid("LLM_PROVIDER", "expected `anthropic` or `openai`"))?;
+        let provider = LlmProvider::parse(provider_name).ok_or(ConfigError::Invalid(
+            "LLM_PROVIDER",
+            "expected `anthropic` or `openai`",
+        ))?;
         let api_key = get("LLM_API_KEY").ok_or(ConfigError::Missing("LLM_API_KEY"))?;
         let model = get("LLM_MODEL").ok_or(ConfigError::Missing("LLM_MODEL"))?;
 
@@ -226,18 +245,25 @@ impl Config {
             .filter(|h| !h.is_empty())
             .collect();
 
-        let base_url = get("LLM_BASE_URL").unwrap_or_else(|| provider.default_base_url().to_string());
+        let base_url =
+            get("LLM_BASE_URL").unwrap_or_else(|| provider.default_base_url().to_string());
         let mut base_url = Url::parse(&base_url)
             .map_err(|_| ConfigError::Invalid("LLM_BASE_URL", "not an absolute URL"))?;
         if !matches!(base_url.scheme(), "http" | "https") {
-            return Err(ConfigError::Invalid("LLM_BASE_URL", "scheme must be http or https"));
+            return Err(ConfigError::Invalid(
+                "LLM_BASE_URL",
+                "scheme must be http or https",
+            ));
         }
         let host = base_url
             .host_str()
             .map(str::to_ascii_lowercase)
             .ok_or(ConfigError::Invalid("LLM_BASE_URL", "no host"))?;
         if !allowed.iter().any(|h| *h == host) {
-            return Err(ConfigError::Invalid("LLM_BASE_URL", "host is not in LLM_ALLOWED_HOSTS"));
+            return Err(ConfigError::Invalid(
+                "LLM_BASE_URL",
+                "host is not in LLM_ALLOWED_HOSTS",
+            ));
         }
         // Paths are joined onto the base, so it must end with a slash.
         if !base_url.path().ends_with('/') {
@@ -254,7 +280,13 @@ impl Config {
                 .ok_or(ConfigError::Invalid("LLM_TIMEOUT_SECS", "expected 1..=600"))?,
         };
 
-        Ok(LlmSettings { provider, model, api_key, base_url, timeout: Duration::from_secs(timeout) })
+        Ok(LlmSettings {
+            provider,
+            model,
+            api_key,
+            base_url,
+            timeout: Duration::from_secs(timeout),
+        })
     }
 }
 
@@ -264,13 +296,17 @@ mod tests {
     use std::collections::HashMap;
 
     fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
-        let map: HashMap<String, String> =
-            pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let map: HashMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
         move |name| map.get(name).cloned()
     }
 
-    const BASE: &[(&str, &str)] =
-        &[("DATABASE_URL", "postgres://u:p@localhost/db"), ("JWT_SECRET", "unit-test-secret")];
+    const BASE: &[(&str, &str)] = &[
+        ("DATABASE_URL", "postgres://u:p@localhost/db"),
+        ("JWT_SECRET", "unit-test-secret"),
+    ];
 
     #[test]
     fn required_only_uses_defaults() {
@@ -284,9 +320,11 @@ mod tests {
 
     #[test]
     fn cookie_secure_parses_and_rejects_garbage() {
-        let off = Config::from_lookup(env(&[BASE[0], BASE[1], ("COOKIE_SECURE", "false")])).unwrap();
+        let off =
+            Config::from_lookup(env(&[BASE[0], BASE[1], ("COOKIE_SECURE", "false")])).unwrap();
         assert!(!off.cookie_secure);
-        let err = Config::from_lookup(env(&[BASE[0], BASE[1], ("COOKIE_SECURE", "maybe")])).unwrap_err();
+        let err =
+            Config::from_lookup(env(&[BASE[0], BASE[1], ("COOKIE_SECURE", "maybe")])).unwrap_err();
         assert!(matches!(err, ConfigError::Invalid("COOKIE_SECURE", _)));
     }
 
@@ -295,12 +333,27 @@ mod tests {
         let cfg = Config::from_lookup(env(BASE)).unwrap();
         assert_eq!(cfg.auth_limits, AuthLimits::default());
         let cfg = Config::from_lookup(env(&[
-            BASE[0], BASE[1],
-            ("AUTH_RATE_LIMIT_PER_IP", "7"), ("AUTH_RATE_LIMIT_PER_EMAIL", "3"), ("AUTH_RATE_LIMIT_WINDOW_SECS", "60"),
-        ])).unwrap();
-        assert_eq!(cfg.auth_limits, AuthLimits { per_ip: 7, per_email: 3, window: Duration::from_secs(60) });
-        let err = Config::from_lookup(env(&[BASE[0], BASE[1], ("AUTH_RATE_LIMIT_PER_EMAIL", "0")])).unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid("AUTH_RATE_LIMIT_PER_EMAIL", _)));
+            BASE[0],
+            BASE[1],
+            ("AUTH_RATE_LIMIT_PER_IP", "7"),
+            ("AUTH_RATE_LIMIT_PER_EMAIL", "3"),
+            ("AUTH_RATE_LIMIT_WINDOW_SECS", "60"),
+        ]))
+        .unwrap();
+        assert_eq!(
+            cfg.auth_limits,
+            AuthLimits {
+                per_ip: 7,
+                per_email: 3,
+                window: Duration::from_secs(60)
+            }
+        );
+        let err = Config::from_lookup(env(&[BASE[0], BASE[1], ("AUTH_RATE_LIMIT_PER_EMAIL", "0")]))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::Invalid("AUTH_RATE_LIMIT_PER_EMAIL", _)
+        ));
     }
 
     #[test]
@@ -332,23 +385,37 @@ mod tests {
     fn errors_never_contain_values() {
         let secret = "s3cr3t-value";
         let url = "postgres://user:pw@host/db";
-        let err = Config::from_lookup(env(&[("DATABASE_URL", url), ("JWT_SECRET", secret), ("PORT", "nope")]))
-            .unwrap_err();
+        let err = Config::from_lookup(env(&[
+            ("DATABASE_URL", url),
+            ("JWT_SECRET", secret),
+            ("PORT", "nope"),
+        ]))
+        .unwrap_err();
         let text = err.to_string();
-        assert!(!text.contains(secret) && !text.contains(url) && !text.contains("nope"), "{text}");
+        assert!(
+            !text.contains(secret) && !text.contains(url) && !text.contains("nope"),
+            "{text}"
+        );
     }
 
     #[test]
     fn debug_output_redacts_secrets() {
         let cfg = Config::from_lookup(env(BASE)).unwrap();
         let text = format!("{cfg:?}");
-        assert!(!text.contains("unit-test-secret") && !text.contains("postgres://"), "{text}");
+        assert!(
+            !text.contains("unit-test-secret") && !text.contains("postgres://"),
+            "{text}"
+        );
         assert!(text.contains("<redacted>"));
     }
 
     fn with_llm(extra: &[(&str, &str)]) -> Result<Config, ConfigError> {
         let mut pairs = BASE.to_vec();
-        pairs.extend([("LLM_PROVIDER", "anthropic"), ("LLM_API_KEY", "llm-key"), ("LLM_MODEL", "claude-x")]);
+        pairs.extend([
+            ("LLM_PROVIDER", "anthropic"),
+            ("LLM_API_KEY", "llm-key"),
+            ("LLM_MODEL", "claude-x"),
+        ]);
         pairs.extend(extra.iter().copied());
         Config::from_lookup(env(&pairs))
     }
@@ -370,9 +437,15 @@ mod tests {
     fn llm_provider_requires_key_and_model() {
         let mut pairs = BASE.to_vec();
         pairs.push(("LLM_PROVIDER", "openai"));
-        assert_eq!(Config::from_lookup(env(&pairs)).unwrap_err(), ConfigError::Missing("LLM_API_KEY"));
+        assert_eq!(
+            Config::from_lookup(env(&pairs)).unwrap_err(),
+            ConfigError::Missing("LLM_API_KEY")
+        );
         pairs.push(("LLM_API_KEY", "k"));
-        assert_eq!(Config::from_lookup(env(&pairs)).unwrap_err(), ConfigError::Missing("LLM_MODEL"));
+        assert_eq!(
+            Config::from_lookup(env(&pairs)).unwrap_err(),
+            ConfigError::Missing("LLM_MODEL")
+        );
     }
 
     #[test]
@@ -387,23 +460,36 @@ mod tests {
         assert!(matches!(err, ConfigError::Invalid("LLM_BASE_URL", _)));
         assert!(!err.to_string().contains("evil.example"));
 
-        let ok = with_llm(&[("LLM_BASE_URL", "http://localhost:11434"), ("LLM_ALLOWED_HOSTS", "localhost")])
-            .unwrap()
-            .llm
-            .unwrap();
+        let ok = with_llm(&[
+            ("LLM_BASE_URL", "http://localhost:11434"),
+            ("LLM_ALLOWED_HOSTS", "localhost"),
+        ])
+        .unwrap()
+        .llm
+        .unwrap();
         assert_eq!(ok.base_url.as_str(), "http://localhost:11434/");
     }
 
     #[test]
     fn llm_base_url_scheme_must_be_http_or_https() {
-        let err = with_llm(&[("LLM_BASE_URL", "ftp://api.anthropic.com"), ]).unwrap_err();
+        let err = with_llm(&[("LLM_BASE_URL", "ftp://api.anthropic.com")]).unwrap_err();
         assert!(matches!(err, ConfigError::Invalid("LLM_BASE_URL", _)));
     }
 
     #[test]
     fn llm_timeout_bounds() {
-        assert!(matches!(with_llm(&[("LLM_TIMEOUT_SECS", "0")]).unwrap_err(), ConfigError::Invalid("LLM_TIMEOUT_SECS", _)));
-        assert_eq!(with_llm(&[("LLM_TIMEOUT_SECS", "5")]).unwrap().llm.unwrap().timeout, Duration::from_secs(5));
+        assert!(matches!(
+            with_llm(&[("LLM_TIMEOUT_SECS", "0")]).unwrap_err(),
+            ConfigError::Invalid("LLM_TIMEOUT_SECS", _)
+        ));
+        assert_eq!(
+            with_llm(&[("LLM_TIMEOUT_SECS", "5")])
+                .unwrap()
+                .llm
+                .unwrap()
+                .timeout,
+            Duration::from_secs(5)
+        );
     }
 
     #[test]
@@ -414,19 +500,35 @@ mod tests {
 
     #[test]
     fn operator_secret_is_optional_bounded_and_redacted() {
-        assert!(Config::from_lookup(env(BASE)).unwrap().operator_secret.is_none());
-        let err = Config::from_lookup(env(&[BASE[0], BASE[1], ("OPERATOR_SECRET", "short")])).unwrap_err();
+        assert!(Config::from_lookup(env(BASE))
+            .unwrap()
+            .operator_secret
+            .is_none());
+        let err = Config::from_lookup(env(&[BASE[0], BASE[1], ("OPERATOR_SECRET", "short")]))
+            .unwrap_err();
         assert!(matches!(err, ConfigError::Invalid("OPERATOR_SECRET", _)));
         assert!(!err.to_string().contains("short"));
-        let cfg = Config::from_lookup(env(&[BASE[0], BASE[1], ("OPERATOR_SECRET", "operator-secret-0123456789")])).unwrap();
-        assert_eq!(cfg.operator_secret.as_deref(), Some("operator-secret-0123456789"));
+        let cfg = Config::from_lookup(env(&[
+            BASE[0],
+            BASE[1],
+            ("OPERATOR_SECRET", "operator-secret-0123456789"),
+        ]))
+        .unwrap();
+        assert_eq!(
+            cfg.operator_secret.as_deref(),
+            Some("operator-secret-0123456789")
+        );
         assert!(!format!("{cfg:?}").contains("operator-secret-0123456789"));
     }
 
     #[test]
     fn optional_overrides_apply() {
         let mut pairs = BASE.to_vec();
-        pairs.extend([("PORT", "8081"), ("CORS_ORIGIN", "https://app.example"), ("UPLOADS_DIR", "/var/up")]);
+        pairs.extend([
+            ("PORT", "8081"),
+            ("CORS_ORIGIN", "https://app.example"),
+            ("UPLOADS_DIR", "/var/up"),
+        ]);
         let cfg = Config::from_lookup(env(&pairs)).unwrap();
         assert_eq!(cfg.port, 8081);
         assert_eq!(cfg.cors_origin, "https://app.example");
@@ -439,13 +541,19 @@ mod tests {
         assert!(cfg.anthropic_api_key.is_none());
         assert_eq!(cfg.operator_model, "claude-opus-5-5");
         let cfg = Config::from_lookup(env(&[
-            BASE[0], BASE[1],
-            ("ANTHROPIC_API_KEY", "sk-ant-unit-test"), ("OPERATOR_MODEL", " claude-sonnet-5-5 "),
-        ])).unwrap();
+            BASE[0],
+            BASE[1],
+            ("ANTHROPIC_API_KEY", "sk-ant-unit-test"),
+            ("OPERATOR_MODEL", " claude-sonnet-5-5 "),
+        ]))
+        .unwrap();
         assert_eq!(cfg.anthropic_api_key.as_deref(), Some("sk-ant-unit-test"));
         assert_eq!(cfg.operator_model, "claude-sonnet-5-5");
         let text = format!("{cfg:?}");
-        assert!(!text.contains("sk-ant-unit-test") && text.contains("claude-sonnet-5-5"), "{text}");
+        assert!(
+            !text.contains("sk-ant-unit-test") && text.contains("claude-sonnet-5-5"),
+            "{text}"
+        );
         let cfg = Config::from_lookup(env(&[BASE[0], BASE[1], ("OPERATOR_MODEL", "  ")])).unwrap();
         assert_eq!(cfg.operator_model, "claude-opus-5-5", "blank is unset");
     }

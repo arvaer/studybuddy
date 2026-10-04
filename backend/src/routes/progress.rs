@@ -1,10 +1,4 @@
-use axum::{
-    Router,
-    extract::State,
-    response::IntoResponse,
-    routing::get,
-    Json,
-};
+use axum::{extract::State, response::IntoResponse, routing::get, Json, Router};
 
 use app::services::progress::ProgressService;
 use infra::repositories::progress::PgProgressRepository;

@@ -1,9 +1,8 @@
 use axum::{
-    Router,
     extract::{Path, Query, State},
     response::IntoResponse,
     routing::get,
-    Json,
+    Json, Router,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -18,8 +17,11 @@ use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/concepts",     get(list).post(create))
-        .route("/concepts/{id}", get(get_one).patch(update).delete(delete_one))
+        .route("/concepts", get(list).post(create))
+        .route(
+            "/concepts/{id}",
+            get(get_one).patch(update).delete(delete_one),
+        )
 }
 
 #[derive(Deserialize)]
@@ -52,7 +54,10 @@ async fn create(
     Json(req): Json<CreateConceptRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
     let svc = ConceptService::new(PgConceptRepository::new(state.pool));
-    Ok((axum::http::StatusCode::CREATED, Json(svc.create(user_id, req).await?)))
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(svc.create(user_id, req).await?),
+    ))
 }
 
 async fn update(

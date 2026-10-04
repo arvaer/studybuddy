@@ -603,4 +603,50 @@ mod tests {
         assert_eq!(activities, 2);
         runtime.close(ws.parse().unwrap()).await.unwrap();
     }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn a_dead_process_lease_reads_as_unavailable_until_it_lapses(pool: PgPool) {
+        let (app, runtime) = serve(&pool, scripted(Calls::default(), vec![FIRST])).await;
+        let user = learner(&pool, "e@x.test").await;
+        let (_, current) = call(&app, "GET", "/api/workspaces/current", user, None).await;
+        let ws = current["id"].as_str().unwrap().to_string();
+        call(
+            &app,
+            "POST",
+            &format!("/api/workspaces/{ws}/goal"),
+            user,
+            Some(json!({ "intent": "Understand the return." })),
+        )
+        .await;
+        let first = settled(&app, user, &ws).await;
+        assert_eq!(first["operator"], "waiting", "{first}");
+        runtime.close(ws.parse().unwrap()).await.unwrap();
+
+        // The process died holding the lease: the row still names it, with
+        // time left. A new process reads the page as unavailable, not 500.
+        sqlx::query(
+            "UPDATE workspace_sessions SET owner_lease = gen_random_uuid(),
+             lease_until = now() + interval '1 minute' WHERE workspace_id = $1::uuid",
+        )
+        .bind(&ws)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let (app, runtime) = serve(&pool, scripted(Calls::default(), vec![])).await;
+        let (status, body) = call(&app, "GET", &format!("/api/workspaces/{ws}"), user, None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["operator"], "unavailable", "{body}");
+        assert_eq!(body["goal"]["intent"], "Understand the return.");
+
+        // The lease lapses; the same read reopens the record and finds the wait.
+        sqlx::query("UPDATE workspace_sessions SET lease_until = now() - interval '1 second' WHERE workspace_id = $1::uuid")
+            .bind(&ws)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let after = settled(&app, user, &ws).await;
+        assert_eq!(after["operator"], "waiting", "{after}");
+        assert_eq!(after["currentActivityId"], first["currentActivityId"]);
+        runtime.close(ws.parse().unwrap()).await.unwrap();
+    }
 }

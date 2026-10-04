@@ -12,7 +12,7 @@ export interface Goal {
   createdAt: string;
 }
 
-export type OperatorPhase = "idle" | "thinking" | "waiting" | "stalled";
+export type OperatorPhase = "idle" | "thinking" | "waiting" | "stalled" | "unavailable";
 
 export interface Workspace {
   id: string;
@@ -24,6 +24,8 @@ export interface Workspace {
   last?: string | null;
   /// `stalled`: what the operator is parked on.
   families?: string[];
+  /// `unavailable`: why the operator cannot be reached right now.
+  why?: string;
 }
 
 /** The learner's one workspace, made on first sight. */
@@ -53,10 +55,12 @@ export function operatorLine(ws: Workspace): string | null {
       return `The operator is parked on ${(ws.families ?? []).join(", ") || "something it cannot settle"}.`;
     case "idle":
       return ws.last ? `The operator finished: ${ws.last}` : "The operator has nothing in flight.";
+    case "unavailable":
+      return "The operator is coming back after a restart…";
   }
 }
 
 /** Whether the page should ask again soon. */
 export function shouldPoll(ws: Workspace | null): boolean {
-  return !!ws?.goal && ws.operator === "thinking";
+  return !!ws?.goal && (ws.operator === "thinking" || ws.operator === "unavailable");
 }

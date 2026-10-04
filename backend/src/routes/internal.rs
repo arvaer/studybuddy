@@ -176,7 +176,9 @@ async fn effect(
 /// objects, so the request is built here, where the manual route's DTO is.
 fn parse_present(workspace: Uuid, payload: &[Value]) -> Result<CreateActivityRequest, Response> {
     let [path, kind, prompt, answer_key] = payload else {
-        return Err(refused(format!("{PRESENT_FAMILY} takes [path kind prompt answer-key]")));
+        return Err(refused(format!(
+            "{PRESENT_FAMILY} takes [path kind prompt answer-key]"
+        )));
     };
     let path = match path {
         Value::String(path) => path.clone(),
@@ -278,7 +280,10 @@ mod tests {
     /// A runtime for tests: no model, the endpoint at a base URL nothing
     /// listens on (these tests never start a run).
     async fn runtime(pool: &PgPool, secret: &str) -> Arc<crate::runtime::OperatorRuntime> {
-        let (name,): (String,) = sqlx::query_as("SELECT current_database()").fetch_one(pool).await.unwrap();
+        let (name,): (String,) = sqlx::query_as("SELECT current_database()")
+            .fetch_one(pool)
+            .await
+            .unwrap();
         let base = std::env::var("DATABASE_URL").expect("DATABASE_URL");
         let (prefix, _) = base.rsplit_once('/').expect("a database in DATABASE_URL");
         Arc::new(crate::runtime::OperatorRuntime::new(
@@ -355,7 +360,10 @@ mod tests {
             path,
             activity["kind"],
             activity["revision"]["prompt"],
-            activity["revision"].get("answerKey").cloned().unwrap_or(Value::Null)
+            activity["revision"]
+                .get("answerKey")
+                .cloned()
+                .unwrap_or(Value::Null)
         ]);
         json!({ "id": id, "capability": PRESENT_FAMILY, "payload": payload })
     }
@@ -581,14 +589,20 @@ mod tests {
             json!({ "kind": "lecture", "revision": { "prompt": "P", "answerKey": "A" } }),
         );
         let (_, reply) = send(&app, post(&effect_uri(ws), Some(SECRET), &unknown_kind)).await;
-        assert!(reply["refused"].as_str().unwrap().contains("kind"), "{reply}");
+        assert!(
+            reply["refused"].as_str().unwrap().contains("kind"),
+            "{reply}"
+        );
 
         // The path as the kernel hands it on, a segment list, is the same
         // path; a list naming another workspace is outside the scope.
         let listed = json!({ "id": "sha256:present-1", "capability": PRESENT_FAMILY,
             "payload": [["workspaces", Uuid::new_v4().to_string(), "activities"], "recall", "P", "A"] });
         let (_, reply) = send(&app, post(&effect_uri(ws), Some(SECRET), &listed)).await;
-        assert!(reply["refused"].as_str().unwrap().contains("outside"), "{reply}");
+        assert!(
+            reply["refused"].as_str().unwrap().contains("outside"),
+            "{reply}"
+        );
 
         assert_eq!(counts(&pool).await, (0, 0, 0));
         let segments = json!({ "id": "sha256:present-1", "capability": PRESENT_FAMILY,

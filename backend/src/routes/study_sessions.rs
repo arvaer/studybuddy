@@ -1,9 +1,8 @@
 use axum::{
-    Router,
     extract::{Path, Query, State},
     response::IntoResponse,
     routing::{get, patch, post},
-    Json,
+    Json, Router,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -18,8 +17,8 @@ use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/study-sessions",              get(list).post(create))
-        .route("/study-sessions/{id}",          patch(update_progress))
+        .route("/study-sessions", get(list).post(create))
+        .route("/study-sessions/{id}", patch(update_progress))
         .route("/study-sessions/{id}/complete", post(complete))
 }
 
@@ -44,7 +43,10 @@ async fn create(
     Json(req): Json<CreateStudySessionRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
     let svc = StudySessionService::new(PgStudySessionRepository::new(state.pool));
-    Ok((axum::http::StatusCode::CREATED, Json(svc.create(user_id, req).await?)))
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(svc.create(user_id, req).await?),
+    ))
 }
 
 async fn update_progress(

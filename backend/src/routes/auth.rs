@@ -2,14 +2,13 @@ use std::net::SocketAddr;
 use std::time::Instant;
 
 use axum::{
-    Router,
     extract::{ConnectInfo, State},
     response::IntoResponse,
     routing::{get, post},
-    Json,
+    Json, Router,
 };
-use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
+use axum_extra::extract::CookieJar;
 
 use app::dtos::auth::{LoginRequest, SignupRequest};
 use app::errors::AppError;
@@ -22,11 +21,11 @@ use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/auth/signup",  post(signup))
-        .route("/api/auth/login",   post(login))
-        .route("/api/auth/logout",  post(logout))
+        .route("/api/auth/signup", post(signup))
+        .route("/api/auth/login", post(login))
+        .route("/api/auth/logout", post(logout))
         .route("/api/auth/refresh", post(refresh))
-        .route("/api/auth/me",      get(me))
+        .route("/api/auth/me", get(me))
 }
 
 async fn signup(
@@ -63,8 +62,8 @@ async fn logout(
     State(state): State<AppState>,
     jar: CookieJar,
 ) -> Result<impl IntoResponse, HttpError> {
-    let svc    = make_service(&state);
-    let raw    = jar.get("refresh_token").map(|c| c.value().to_string());
+    let svc = make_service(&state);
+    let raw = jar.get("refresh_token").map(|c| c.value().to_string());
     svc.logout(raw.as_deref()).await?;
 
     // A removal cookie must match the path the cookie was set with.
@@ -95,8 +94,8 @@ async fn me(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
 ) -> Result<impl IntoResponse, HttpError> {
-    use infra::repositories::user::PgUserRepository;
     use domain::repository_traits::UserRepository;
+    use infra::repositories::user::PgUserRepository;
 
     let repo = PgUserRepository::new(state.pool.clone());
     let user = repo.find_by_id(user_id).await?;
@@ -114,7 +113,12 @@ fn limit(state: &AppState, peer: SocketAddr, email: &str) -> Result<(), HttpErro
     state
         .auth_limiter
         .check(&peer.ip().to_string(), email, Instant::now())
-        .map_err(|wait| AppError::TooManyRequests { retry_after_secs: wait.as_secs().max(1) }.into())
+        .map_err(|wait| {
+            AppError::TooManyRequests {
+                retry_after_secs: wait.as_secs().max(1),
+            }
+            .into()
+        })
 }
 
 fn make_service(state: &AppState) -> AuthService<PgUserRepository> {
