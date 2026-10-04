@@ -79,3 +79,22 @@ export async function recordAttempt(req: RecordAttemptRequest): Promise<Recorded
   const { status, body } = await requestWithStatus<AttemptReceipt>("POST", "/api/attempts", req);
   return { receipt: body, replayed: status === 200 };
 }
+
+// ─── Hints (20c) ─────────────────────────────────────────────────────────────
+
+export interface Hint {
+  id: string;
+  text: string;
+  createdAt: string;
+}
+
+/** Ask the operator for a hint on a revision, with the draft so far. The
+ *  hint lands a few seconds later on `fetchHints`. */
+export async function requestHint(revisionId: string, draft: string): Promise<void> {
+  await requestWithStatus<unknown>("POST", `/api/attempts/drafts/${revisionId}/hint`, { draft });
+}
+
+export async function fetchHints(revisionId: string): Promise<Hint[]> {
+  const data = await apiGet<{ hints: Hint[] }>(`/api/attempts/drafts/${revisionId}/hint`);
+  return data.hints;
+}

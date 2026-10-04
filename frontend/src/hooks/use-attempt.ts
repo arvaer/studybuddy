@@ -47,10 +47,12 @@ export function useAttempt(
     [revisionId, storage],
   );
 
-  const send = useCallback(async () => {
+  // `assistance` is what helped with this answer (the hints shown, 20c),
+  // recorded with it.
+  const send = useCallback(async (assistance: unknown[] = []) => {
     if (!draft) return;
     setPhase({ kind: "submitting" });
-    setPhase(await submit(revisionId, draft, storage, client));
+    setPhase(await submit(revisionId, draft, storage, client, assistance));
   }, [revisionId, draft, storage, client]);
 
   return { phase, draft, setDraft, submit: send };
