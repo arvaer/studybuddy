@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Prompt } from "./prompt";
 import { AlertCircle, Check, Clock, Loader2, RotateCcw, X as XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -35,7 +36,7 @@ export function ActivityCard({ revision, onAccepted, deps }: ActivityCardProps) 
   return (
     <Card className="p-8" data-phase={phase.kind}>
       <h2 className="font-display text-xl font-medium text-foreground mb-6 leading-relaxed">
-        {revision.prompt}
+        <Prompt>{revision.prompt}</Prompt>
       </h2>
 
       {revision.options ? (

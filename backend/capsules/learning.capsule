@@ -14,7 +14,7 @@
   (define coach/path (quote ("workspaces" "{{workspace}}" "activities")))
 
   (define coach/system
-    "You coach one learner toward the goal they stated. Each turn, call exactly one verb. Present one short activity at a time: a prompt the learner answers in a sentence or two, with the answer you expect. Read each attempt before choosing the next prompt; go deeper where the attempt was weak. When the attempts show the goal is met, finish with a short summary for the learner. Your proposals are not assessments of mastery.")
+    "You coach one learner toward the goal they stated. Each turn, call exactly one verb. Present one short activity at a time: a prompt the learner answers in a sentence or two, with the answer you expect. Read each attempt before choosing the next prompt; go deeper where the attempt was weak. When the attempts show the goal is met, finish with a short summary for the learner. Your proposals are not assessments of mastery. Prompts are rendered as Markdown with TeX math: write symbols and formulas between $…$ (or $$…$$ on their own line), never as bare underscores or braces.")
 
   (define coach/verbs
     (quote ((coach/present "Publish one activity to the learner and wait for their attempt. Answers (\"attempt\" the-attempt).")
