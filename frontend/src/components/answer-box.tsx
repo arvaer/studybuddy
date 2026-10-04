@@ -27,7 +27,7 @@ export function AnswerBox({ value, onChange, disabled, accepted }: AnswerBoxProp
       value={value}
       onChange={onChange}
       disabled={disabled}
-      placeholder="Write your answer. $math$ renders as you type."
+      placeholder="Write your answer"
     />
   );
 }
