@@ -19,7 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { uploadResource, createTopic } from "@/lib/api";
+import { uploadResource, createTopic, MAX_UPLOAD_MB } from "@/lib/api";
 import type { Topic, Resource } from "@/types/study";
 
 const ACCEPTED = ".pdf,.txt,.md";
@@ -103,6 +103,9 @@ export function UploadResourceModal({
         onTopicCreated(topic);
       }
 
+      if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+        throw new Error(`${file.name} is ${Math.round(file.size / 1024 / 1024)} MB; the limit is ${MAX_UPLOAD_MB} MB`);
+      }
       const resource = await uploadResource(file, resolvedTopicId, title.trim(), []);
       toast.success("Resource uploaded successfully");
       onUploaded(resource);
@@ -188,7 +191,7 @@ export function UploadResourceModal({
                   Drop a file here or click to browse
                 </p>
               )}
-              <p className="text-xs text-muted-foreground">PDF, TXT, or Markdown</p>
+              <p className="text-xs text-muted-foreground">PDF, TXT, or Markdown, up to {MAX_UPLOAD_MB} MB</p>
               <input
                 ref={fileInputRef}
                 type="file"

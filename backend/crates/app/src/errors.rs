@@ -15,6 +15,9 @@ pub enum AppError {
     #[error("Validation: {0}")]
     Validation(String),
 
+    #[error("Payload too large: {0}")]
+    PayloadTooLarge(String),
+
     #[error("Too many attempts; retry after {retry_after_secs} seconds")]
     TooManyRequests { retry_after_secs: u64 },
 

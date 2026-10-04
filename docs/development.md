@@ -48,17 +48,19 @@ Configuration is read once at startup by `backend/src/config.rs`, which is the s
 | `OPERATOR_SECRET` | no | a per-process secret is drawn when unset (20a). At least 16 characters; the bearer secret the embedded owner presents to `/internal/effects` over loopback, never a learner's token (19a). Set it only when something outside this process must call the endpoints |
 | `ANTHROPIC_API_KEY` | no | unset means the operator cannot think. The key capsule-corp reads, for the operator's in-process Claude adapter (19b); never logged |
 | `OPERATOR_MODEL` | no | `claude-opus-5-5`, the launcher's default; the model the adapter asks |
+| `PDFIUM_DIR` | no | `lib`, relative to the backend's working directory: where `libpdfium` is loaded from for PDF text extraction. Fetch it with `scripts/fetch-pdfium.sh`. Missing means PDF uploads keep their bytes and get no page text, with one warning in the log |
 
 The browser never holds model credentials: the proxy accepts only `messages` and `maxTokens`, and any `provider`, `model`, `apiKey` or `baseUrl` field is rejected with 422. Provider failures map to 502 (unreachable, error status, unexpected body) or 504 (timeout); the provider's response body is never forwarded. `GET /api/llm/status` reports whether a provider is configured and which model, without the key.
 
 Generate a local secret with `openssl rand -base64 48`. A `backend/.env` existed in git history before issue #5; treat any value from it as public and rotate it wherever it was deployed.
 
 ```sh
+scripts/fetch-pdfium.sh   # once: the PDFium library into backend/lib (gitignored)
 cd backend
 export JWT_SECRET="$(openssl rand -base64 48)"   # or put it in backend/.env
 cargo build            # compiles SQLx queries against $DATABASE_URL
 cargo test --workspace
-cargo run              # listens on 0.0.0.0:3000
+cargo run              # listens on 0.0.0.0:3000; uploads take files up to 200 MB
 cargo run -- audit-artifacts   # compares the artifact catalog with UPLOADS_DIR and exits; see artifacts.md
 ```
 

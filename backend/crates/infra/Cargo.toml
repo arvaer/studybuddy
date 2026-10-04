@@ -12,7 +12,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
-pdf-extract = { workspace = true }
+pdfium-render = { version = "0.9", default-features = false, features = ["pdfium_latest", "thread_safe"] }
+tracing = "0.1.44"
 
 [dev-dependencies]
 app = { path = "../app" }

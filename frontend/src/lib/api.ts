@@ -367,6 +367,11 @@ export async function createConcept(data: {
 
 // ─── Resource upload ────────────────────────────────────────────────────────
 
+/** The backend's upload cap (`MAX_UPLOAD_MB` in routes/resources.rs). Checked
+ * before sending, because a body over the cap is cut off mid-stream and the
+ * browser reports only a NetworkError. */
+export const MAX_UPLOAD_MB = 200;
+
 export async function uploadResource(
   file: File,
   topicId: string,
