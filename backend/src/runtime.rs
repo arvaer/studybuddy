@@ -69,8 +69,12 @@ const WAIT_FAMILY: &str = "learner/wait";
 #[serde(rename_all = "camelCase", tag = "operator")]
 pub enum OperatorState {
     /// No run in flight, nothing pending. `last` says how the last run
-    /// ended, if one did.
-    Idle { last: Option<String> },
+    /// ended, if one did; `summary` is the coach's closing summary when it
+    /// finished (`coach/finish`), for the page to show whole.
+    Idle {
+        last: Option<String>,
+        summary: Option<String>,
+    },
     /// A run is in flight on the owner thread.
     Thinking,
     /// The run parked on the learner's attempt; the activity to answer.
@@ -392,8 +396,10 @@ impl OperatorRuntime {
                     .collect(),
             });
         }
-        let last = handle.runs()?.last().map(|run| describe(run.outcome()));
-        Ok(OperatorState::Idle { last })
+        let runs = handle.runs()?;
+        let last = runs.last().map(|run| describe(run.outcome()));
+        let summary = runs.last().and_then(|run| summary_of(run.outcome()));
+        Ok(OperatorState::Idle { last, summary })
     }
 }
 
@@ -405,6 +411,18 @@ fn revision_of(park: &Park) -> Option<Uuid> {
 
 fn repository(e: domain::errors::DomainError) -> OperatorError {
     OperatorError::Database(sqlx::Error::Protocol(e.to_string()))
+}
+
+/// The coach's closing summary, when the run ended with `coach/finish`:
+/// the value `("done" summary)`.
+fn summary_of(outcome: &Outcome) -> Option<String> {
+    let Outcome::Value(value) = outcome else {
+        return None;
+    };
+    match value.as_array()?.as_slice() {
+        [tag, summary] if tag == "done" => summary.as_str().map(str::to_string),
+        _ => None,
+    }
 }
 
 /// How a run ended, in a line.

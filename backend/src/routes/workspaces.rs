@@ -48,7 +48,10 @@ async fn describe(state: &AppState, workspace: Uuid) -> Result<WorkspaceResponse
     let goal = repo(state).goal(workspace).await?;
     let operator = match goal {
         // No goal, no session: nothing to open.
-        None => OperatorState::Idle { last: None },
+        None => OperatorState::Idle {
+            last: None,
+            summary: None,
+        },
         Some(_) => state
             .runtime
             .state(workspace)
@@ -87,8 +90,11 @@ async fn get_one(
     Ok(Json(describe(&state, workspace).await?))
 }
 
-/// The intent in: stored as goal revision 1, and the run that serves it
-/// starts now, in the background. Answers 202 with the workspace thinking.
+/// The intent in: stored as the next goal revision, and the run that
+/// serves it starts now, in the background. Answers 202 with the workspace
+/// thinking. A workspace whose operator is still on a goal (thinking,
+/// waiting, stalled, unavailable) answers 409: finish or leave first. One
+/// run per goal; the next goal is the next run on the same instance.
 async fn set_goal(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -96,6 +102,18 @@ async fn set_goal(
     Json(req): Json<GoalRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
     let workspace = repo(&state).owned(user_id, id).await?;
+    if repo(&state).goal(workspace).await?.is_some() {
+        let current = state
+            .runtime
+            .state(workspace)
+            .await
+            .map_err(operator_error)?;
+        if !matches!(current, OperatorState::Idle { .. }) {
+            return Err(HttpError(app::errors::AppError::Conflict(
+                "the operator is still on the current goal".into(),
+            )));
+        }
+    }
     let goal = repo(&state).set_goal(workspace, &req.intent).await?;
     state.runtime.start(workspace, goal.id, goal.intent.clone());
     Ok((
@@ -360,7 +378,7 @@ mod tests {
             "the goal is the model's task"
         );
 
-        // One goal per workspace in Phase 2.
+        // No second goal while the operator is on this one.
         let (status, _) = call(
             &app,
             "POST",
@@ -647,6 +665,63 @@ mod tests {
         let after = settled(&app, user, &ws).await;
         assert_eq!(after["operator"], "waiting", "{after}");
         assert_eq!(after["currentActivityId"], first["currentActivityId"]);
+        runtime.close(ws.parse().unwrap()).await.unwrap();
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn a_finished_workspace_shows_the_summary_and_takes_the_next_goal(pool: PgPool) {
+        let models = Calls::default();
+        let (app, runtime) =
+            serve(&pool, scripted(models.clone(), vec![FIRST, FINISH, FIRST])).await;
+        let user = learner(&pool, "f@x.test").await;
+        let (_, current) = call(&app, "GET", "/api/workspaces/current", user, None).await;
+        let ws = current["id"].as_str().unwrap().to_string();
+        call(
+            &app,
+            "POST",
+            &format!("/api/workspaces/{ws}/goal"),
+            user,
+            Some(json!({ "intent": "Understand the return." })),
+        )
+        .await;
+        let first = settled(&app, user, &ws).await;
+        let revision = revision_of(&pool, first["currentActivityId"].as_str().unwrap()).await;
+        call(
+            &app,
+            "POST",
+            "/api/attempts",
+            user,
+            Some(json!({ "requestKey": "k1", "activityRevisionId": revision, "response": "the discounted sum of future rewards" })),
+        )
+        .await;
+
+        // The coach finishes: idle, with the summary whole, not a debug line.
+        let done = settled(&app, user, &ws).await;
+        assert_eq!(done["operator"], "idle", "{done}");
+        assert_eq!(
+            done["summary"],
+            "You can define the return and say why it is discounted."
+        );
+
+        // The next intent is goal revision 2 and a new run on the same
+        // instance; the first activity of the new goal lands.
+        let (status, body) = call(
+            &app,
+            "POST",
+            &format!("/api/workspaces/{ws}/goal"),
+            user,
+            Some(json!({ "intent": "Now the Bellman equation." })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        assert_eq!(body["goal"]["revision"], 2);
+        let next = settled(&app, user, &ws).await;
+        assert_eq!(next["operator"], "waiting", "{next}");
+        assert_ne!(next["currentActivityId"], first["currentActivityId"]);
+        assert_eq!(
+            models.lock().unwrap()[2].payload()[0][3],
+            "Now the Bellman equation."
+        );
         runtime.close(ws.parse().unwrap()).await.unwrap();
     }
 }

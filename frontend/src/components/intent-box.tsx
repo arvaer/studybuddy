@@ -8,9 +8,11 @@ import { Textarea } from "@/components/ui/textarea";
 
 interface IntentBoxProps {
   onSubmit: (intent: string) => Promise<void>;
+  /// The heading; the first goal asks one thing, the next another.
+  title?: string;
 }
 
-export function IntentBox({ onSubmit }: IntentBoxProps) {
+export function IntentBox({ onSubmit, title = "What do you want to learn?" }: IntentBoxProps) {
   const [intent, setIntent] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +32,7 @@ export function IntentBox({ onSubmit }: IntentBoxProps) {
 
   return (
     <div className="w-full max-w-xl mx-auto flex flex-col gap-3">
-      <h1 className="font-display text-2xl font-semibold text-foreground">What do you want to learn?</h1>
+      <h1 className="font-display text-2xl font-semibold text-foreground">{title}</h1>
       <Textarea
         value={intent}
         onChange={(e) => setIntent(e.target.value)}

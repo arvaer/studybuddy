@@ -78,7 +78,11 @@ impl PgWorkspaceRepository {
 
     /// The owner's first attempt against `revision`, if any: what a parked
     /// `learner/wait` is waiting for (20b).
-    pub async fn first_attempt(&self, user_id: Uuid, revision: Uuid) -> Result<Option<Uuid>, DomainError> {
+    pub async fn first_attempt(
+        &self,
+        user_id: Uuid,
+        revision: Uuid,
+    ) -> Result<Option<Uuid>, DomainError> {
         let row: Option<(Uuid,)> = sqlx::query_as(
             "SELECT id FROM attempts WHERE user_id = $1 AND activity_revision_id = $2
              ORDER BY submitted_at, id LIMIT 1",
@@ -117,8 +121,9 @@ impl PgWorkspaceRepository {
         .map_err(db)
     }
 
-    /// Store `intent` as the workspace's goal, revision 1. A workspace that
-    /// has a goal answers `Conflict`: one goal per workspace in Phase 2.
+    /// Store `intent` as the workspace's next goal revision. Whether a new
+    /// goal may be set now (only when the operator is idle) is the route's
+    /// check; the unique (workspace, revision) key settles a race.
     pub async fn set_goal(&self, workspace: Uuid, intent: &str) -> Result<Goal, DomainError> {
         let intent = intent.trim();
         if intent.is_empty() {
@@ -129,16 +134,20 @@ impl PgWorkspaceRepository {
                 "intent must be at most 2000 characters".into(),
             ));
         }
-        let inserted: Option<Goal> = sqlx::query_as(
+        sqlx::query_as(
             "INSERT INTO goals (workspace_id, revision, intent)
-             SELECT $1, 1, $2 WHERE NOT EXISTS (SELECT 1 FROM goals WHERE workspace_id = $1)
+             SELECT $1, coalesce(max(revision), 0) + 1, $2 FROM goals WHERE workspace_id = $1
              RETURNING id, workspace_id, revision, intent, created_at",
         )
         .bind(workspace)
         .bind(intent)
-        .fetch_optional(&self.pool)
+        .fetch_one(&self.pool)
         .await
-        .map_err(db)?;
-        inserted.ok_or_else(|| DomainError::Conflict("this workspace already has a goal".into()))
+        .map_err(|e| match e {
+            sqlx::Error::Database(ref d) if d.is_unique_violation() => {
+                DomainError::Conflict("a goal was just set for this workspace".into())
+            }
+            other => db(other),
+        })
     }
 }
