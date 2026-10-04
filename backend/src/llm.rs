@@ -125,7 +125,9 @@ pub struct LlmClient {
 
 impl LlmClient {
     pub fn new(settings: LlmSettings) -> Result<Self, reqwest::Error> {
-        let http = reqwest::Client::builder().timeout(settings.timeout).build()?;
+        let http = reqwest::Client::builder()
+            .timeout(settings.timeout)
+            .build()?;
         Ok(Self { settings, http })
     }
 
@@ -147,11 +149,15 @@ impl LlmClient {
             return Err(LlmError::Validation("messages must not be empty".into()));
         }
         if messages.iter().any(|m| m.content.trim().is_empty()) {
-            return Err(LlmError::Validation("message content must not be empty".into()));
+            return Err(LlmError::Validation(
+                "message content must not be empty".into(),
+            ));
         }
         let max_tokens = max_tokens.unwrap_or(MAX_TOKENS_DEFAULT);
         if max_tokens == 0 || max_tokens > MAX_TOKENS_CAP {
-            return Err(LlmError::Validation(format!("maxTokens must be 1..={MAX_TOKENS_CAP}")));
+            return Err(LlmError::Validation(format!(
+                "maxTokens must be 1..={MAX_TOKENS_CAP}"
+            )));
         }
 
         let s = &self.settings;
@@ -163,9 +169,12 @@ impl LlmClient {
                     .filter(|m| m.role == LlmRole::System)
                     .map(|m| m.content.as_str())
                     .collect();
-                let chat: Vec<&LlmMessage> =
-                    messages.iter().filter(|m| m.role != LlmRole::System).collect();
-                let mut body = json!({ "model": s.model, "messages": chat, "max_tokens": max_tokens });
+                let chat: Vec<&LlmMessage> = messages
+                    .iter()
+                    .filter(|m| m.role != LlmRole::System)
+                    .collect();
+                let mut body =
+                    json!({ "model": s.model, "messages": chat, "max_tokens": max_tokens });
                 if !system.is_empty() {
                     body["system"] = json!(system.join("\n\n"));
                 }
@@ -203,7 +212,11 @@ impl LlmClient {
         }
 
         let raw: serde_json::Value = resp.json().await.map_err(|e| {
-            if e.is_timeout() { LlmError::Timeout } else { LlmError::Malformed }
+            if e.is_timeout() {
+                LlmError::Timeout
+            } else {
+                LlmError::Malformed
+            }
         })?;
         extract_content(&raw, s.provider).ok_or(LlmError::Malformed)
     }
@@ -228,8 +241,16 @@ pub struct LlmStatus {
 impl LlmStatus {
     pub fn of(client: Option<&LlmClient>) -> Self {
         match client {
-            Some(c) => Self { configured: true, provider: Some(c.provider().name()), model: Some(c.model().to_string()) },
-            None => Self { configured: false, provider: None, model: None },
+            Some(c) => Self {
+                configured: true,
+                provider: Some(c.provider().name()),
+                model: Some(c.model().to_string()),
+            },
+            None => Self {
+                configured: false,
+                provider: None,
+                model: None,
+            },
         }
     }
 }
@@ -246,7 +267,11 @@ mod tests {
         mode: &'static str,
     }
 
-    async fn anthropic(State(f): State<Arc<Fake>>, headers: HeaderMap, body: String) -> axum::response::Response {
+    async fn anthropic(
+        State(f): State<Arc<Fake>>,
+        headers: HeaderMap,
+        body: String,
+    ) -> axum::response::Response {
         if headers.get("x-api-key").is_none() {
             return (StatusCode::UNAUTHORIZED, "no key").into_response();
         }
@@ -258,7 +283,11 @@ mod tests {
         if headers.get("authorization").is_none() {
             return (StatusCode::UNAUTHORIZED, "no key").into_response();
         }
-        respond(&f.mode, json!({ "choices": [{ "message": { "role": "assistant", "content": "openai:ok" } }] })).await
+        respond(
+            &f.mode,
+            json!({ "choices": [{ "message": { "role": "assistant", "content": "openai:ok" } }] }),
+        )
+        .await
     }
 
     async fn respond(mode: &str, ok: serde_json::Value) -> axum::response::Response {
@@ -295,15 +324,24 @@ mod tests {
 
     fn msgs() -> Vec<LlmMessage> {
         vec![
-            LlmMessage { role: LlmRole::System, content: "be brief".into() },
-            LlmMessage { role: LlmRole::User, content: "hi".into() },
+            LlmMessage {
+                role: LlmRole::System,
+                content: "be brief".into(),
+            },
+            LlmMessage {
+                role: LlmRole::User,
+                content: "hi".into(),
+            },
         ]
     }
 
     #[tokio::test]
     async fn anthropic_success_lifts_system_and_sends_key() {
         let c = client(LlmProvider::Anthropic, "ok").await;
-        assert_eq!(c.complete(&msgs(), None).await.unwrap(), "anthropic:\"be brief\"");
+        assert_eq!(
+            c.complete(&msgs(), None).await.unwrap(),
+            "anthropic:\"be brief\""
+        );
     }
 
     #[tokio::test]
@@ -323,19 +361,28 @@ mod tests {
     #[tokio::test]
     async fn non_json_body_is_malformed() {
         let c = client(LlmProvider::Anthropic, "garbage").await;
-        assert!(matches!(c.complete(&msgs(), None).await.unwrap_err(), LlmError::Malformed));
+        assert!(matches!(
+            c.complete(&msgs(), None).await.unwrap_err(),
+            LlmError::Malformed
+        ));
     }
 
     #[tokio::test]
     async fn wrong_shape_is_malformed() {
         let c = client(LlmProvider::OpenAi, "wrong-shape").await;
-        assert!(matches!(c.complete(&msgs(), None).await.unwrap_err(), LlmError::Malformed));
+        assert!(matches!(
+            c.complete(&msgs(), None).await.unwrap_err(),
+            LlmError::Malformed
+        ));
     }
 
     #[tokio::test]
     async fn slow_provider_times_out() {
         let c = client(LlmProvider::OpenAi, "slow").await;
-        assert!(matches!(c.complete(&msgs(), None).await.unwrap_err(), LlmError::Timeout));
+        assert!(matches!(
+            c.complete(&msgs(), None).await.unwrap_err(),
+            LlmError::Timeout
+        ));
     }
 
     #[tokio::test]
@@ -348,15 +395,29 @@ mod tests {
             timeout: Duration::from_millis(300),
         })
         .unwrap();
-        assert!(matches!(c.complete(&msgs(), None).await.unwrap_err(), LlmError::Transport));
+        assert!(matches!(
+            c.complete(&msgs(), None).await.unwrap_err(),
+            LlmError::Transport
+        ));
     }
 
     #[tokio::test]
     async fn request_validation_happens_before_any_call() {
         let c = client(LlmProvider::OpenAi, "ok").await;
-        assert!(matches!(c.complete(&[], None).await.unwrap_err(), LlmError::Validation(_)));
-        assert!(matches!(c.complete(&msgs(), Some(0)).await.unwrap_err(), LlmError::Validation(_)));
-        assert!(matches!(c.complete(&msgs(), Some(MAX_TOKENS_CAP + 1)).await.unwrap_err(), LlmError::Validation(_)));
+        assert!(matches!(
+            c.complete(&[], None).await.unwrap_err(),
+            LlmError::Validation(_)
+        ));
+        assert!(matches!(
+            c.complete(&msgs(), Some(0)).await.unwrap_err(),
+            LlmError::Validation(_)
+        ));
+        assert!(matches!(
+            c.complete(&msgs(), Some(MAX_TOKENS_CAP + 1))
+                .await
+                .unwrap_err(),
+            LlmError::Validation(_)
+        ));
     }
 
     #[test]
@@ -383,6 +444,9 @@ mod tests {
             timeout: Duration::from_secs(1),
         };
         let text = format!("{s:?}");
-        assert!(!text.contains("super-secret") && text.contains("<redacted>"), "{text}");
+        assert!(
+            !text.contains("super-secret") && text.contains("<redacted>"),
+            "{text}"
+        );
     }
 }

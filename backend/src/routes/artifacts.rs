@@ -39,11 +39,16 @@ async fn get_bytes(
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, HttpError> {
     let (artifact, bytes) = store(state).read(user_id, id).await?;
-    let filename = artifact.original_filename.replace(['"', '\\', '\r', '\n'], "_");
+    let filename = artifact
+        .original_filename
+        .replace(['"', '\\', '\r', '\n'], "_");
     Ok((
         [
             (header::CONTENT_TYPE, artifact.content_type),
-            (header::CONTENT_DISPOSITION, format!("inline; filename=\"{filename}\"")),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("inline; filename=\"{filename}\""),
+            ),
             (header::ETAG, format!("\"{}\"", artifact.sha256)),
         ],
         bytes,

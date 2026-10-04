@@ -31,12 +31,19 @@ async fn record(
 ) -> Result<impl IntoResponse, HttpError> {
     let svc = AttemptService::new(PgAttemptRepository::new(state.pool.clone()));
     let recorded = svc.record(user_id, req).await?;
-    let status = if recorded.replayed { StatusCode::OK } else { StatusCode::CREATED };
+    let status = if recorded.replayed {
+        StatusCode::OK
+    } else {
+        StatusCode::CREATED
+    };
 
     // An answer wakes the operator (20b): if the learner's workspace has a
     // wait parked on this revision, the attempt is its receipt and the run
     // goes on in the background. The attempt stands whatever happens here.
-    if let Ok(Some(workspace)) = PgWorkspaceRepository::new(state.pool.clone()).find(user_id).await {
+    if let Ok(Some(workspace)) = PgWorkspaceRepository::new(state.pool.clone())
+        .find(user_id)
+        .await
+    {
         if let Err(error) = state.runtime.poke(workspace).await {
             tracing::warn!(workspace = %workspace, "could not wake the operator: {error}");
         }

@@ -1,9 +1,8 @@
 use axum::{
-    Router,
     extract::{DefaultBodyLimit, Multipart, Path, Query, State},
     response::IntoResponse,
     routing::{delete, get},
-    Json,
+    Json, Router,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -27,13 +26,15 @@ const MAX_UPLOAD_BYTES: usize = MAX_UPLOAD_MB * 1024 * 1024;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/resources",              get(list).post(create))
-        .route("/resources/upload",       axum::routing::post(upload)
-            .layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES)))
-        .route("/resources/{id}",         delete(delete_one))
+        .route("/resources", get(list).post(create))
+        .route(
+            "/resources/upload",
+            axum::routing::post(upload).layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES)),
+        )
+        .route("/resources/{id}", delete(delete_one))
         .route("/resources/{id}/content", get(get_content))
-        .route("/resources/{id}/pages",   get(get_pages))
-        .route("/resources/{id}/file",    get(get_file))
+        .route("/resources/{id}/pages", get(get_pages))
+        .route("/resources/{id}/file", get(get_file))
 }
 
 #[derive(Deserialize)]
@@ -53,8 +54,13 @@ async fn list(
 ) -> Result<impl IntoResponse, HttpError> {
     let svc = ResourceService::new(PgResourceRepository::new(state.pool));
     Ok(Json(
-        svc.list(user_id, q.topic_id, q.concept_id, q.resource_type.as_deref())
-            .await?,
+        svc.list(
+            user_id,
+            q.topic_id,
+            q.concept_id,
+            q.resource_type.as_deref(),
+        )
+        .await?,
     ))
 }
 
@@ -64,14 +70,19 @@ async fn create(
     Json(req): Json<CreateResourceRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
     let svc = ResourceService::new(PgResourceRepository::new(state.pool));
-    Ok((axum::http::StatusCode::CREATED, Json(svc.create(user_id, req).await?)))
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(svc.create(user_id, req).await?),
+    ))
 }
 
 /// A multipart failure as the client should read it: the body limit is 413
 /// naming the limit, anything else 422 with what went wrong.
 fn multipart_error(what: &str, e: axum::extract::multipart::MultipartError) -> HttpError {
     if e.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE {
-        HttpError(AppError::PayloadTooLarge(format!("file is larger than {MAX_UPLOAD_MB} MB")))
+        HttpError(AppError::PayloadTooLarge(format!(
+            "file is larger than {MAX_UPLOAD_MB} MB"
+        )))
     } else {
         HttpError(AppError::Validation(format!("{what}: {e}")))
     }
@@ -124,8 +135,7 @@ async fn upload(
     let topic_id = Uuid::parse_str(&topic_id_str)
         .map_err(|_| HttpError(AppError::Validation("invalid topicId".into())))?;
 
-    let concept_ids: Vec<String> =
-        serde_json::from_str(&concept_ids_json).unwrap_or_default();
+    let concept_ids: Vec<String> = serde_json::from_str(&concept_ids_json).unwrap_or_default();
     let concept_uuids = concept_ids
         .iter()
         .map(|s| Uuid::parse_str(s))
@@ -156,7 +166,12 @@ async fn upload(
     }
 
     if content_type.is_empty() {
-        content_type = if is_pdf { "application/pdf" } else { "text/plain" }.to_string();
+        content_type = if is_pdf {
+            "application/pdf"
+        } else {
+            "text/plain"
+        }
+        .to_string();
     }
 
     let svc = UploadService::new(
@@ -165,7 +180,18 @@ async fn upload(
         uploads_dir,
     );
     let resp = svc
-        .upload(user_id, topic_id, title, filename, &content_type, &bytes, content_text, content_pages, resource_type, concept_uuids)
+        .upload(
+            user_id,
+            topic_id,
+            title,
+            filename,
+            &content_type,
+            &bytes,
+            content_text,
+            content_pages,
+            resource_type,
+            concept_uuids,
+        )
         .await?;
 
     Ok((axum::http::StatusCode::CREATED, Json(resp)))
@@ -191,7 +217,9 @@ struct PagesQuery {
     #[serde(default = "default_page_end")]
     end: usize,
 }
-fn default_page_end() -> usize { usize::MAX }
+fn default_page_end() -> usize {
+    usize::MAX
+}
 
 async fn get_pages(
     State(state): State<AppState>,
@@ -200,7 +228,9 @@ async fn get_pages(
     Query(q): Query<PagesQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
     let repo = PgResourceRepository::new(state.pool);
-    let pages = repo.get_pages(id, user_id, q.start, q.end).await
+    let pages = repo
+        .get_pages(id, user_id, q.start, q.end)
+        .await
         .map_err(HttpError::from)?;
     Ok(Json(serde_json::json!({ "pages": pages })))
 }
@@ -211,7 +241,10 @@ async fn get_file(
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, HttpError> {
     let repo = PgResourceRepository::new(state.pool);
-    let resource = repo.find_by_id(id, user_id).await.map_err(HttpError::from)?;
+    let resource = repo
+        .find_by_id(id, user_id)
+        .await
+        .map_err(HttpError::from)?;
 
     let file_path = resource
         .file_path
@@ -229,10 +262,7 @@ async fn get_file(
         "text/plain"
     };
 
-    Ok((
-        [(axum::http::header::CONTENT_TYPE, content_type)],
-        bytes,
-    ))
+    Ok(([(axum::http::header::CONTENT_TYPE, content_type)], bytes))
 }
 
 async fn delete_one(

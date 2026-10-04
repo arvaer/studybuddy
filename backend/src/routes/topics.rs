@@ -1,9 +1,8 @@
 use axum::{
-    Router,
     extract::{Path, State},
     response::IntoResponse,
     routing::get,
-    Json,
+    Json, Router,
 };
 use uuid::Uuid;
 
@@ -17,8 +16,11 @@ use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/topics",          get(list).post(create))
-        .route("/topics/{id}",      get(get_one).patch(update).delete(delete_one))
+        .route("/topics", get(list).post(create))
+        .route(
+            "/topics/{id}",
+            get(get_one).patch(update).delete(delete_one),
+        )
 }
 
 async fn list(
@@ -44,7 +46,10 @@ async fn create(
     Json(req): Json<CreateTopicRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
     let svc = TopicService::new(PgTopicRepository::new(state.pool));
-    Ok((axum::http::StatusCode::CREATED, Json(svc.create(user_id, req).await?)))
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(svc.create(user_id, req).await?),
+    ))
 }
 
 async fn update(

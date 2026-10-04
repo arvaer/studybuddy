@@ -1,10 +1,4 @@
-use axum::{
-    Router,
-    extract::State,
-    response::IntoResponse,
-    routing::get,
-    Json,
-};
+use axum::{extract::State, response::IntoResponse, routing::get, Json, Router};
 
 use app::dtos::settings::UpdateSettingsRequest;
 use app::services::settings::SettingsService;

@@ -1,4 +1,8 @@
-use axum::{extract::State, routing::{get, post}, Json, Router};
+use axum::{
+    extract::State,
+    routing::{get, post},
+    Json, Router,
+};
 
 use app::dtos::llm::{LlmProxyRequest, LlmProxyResponse};
 

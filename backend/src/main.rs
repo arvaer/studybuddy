@@ -6,9 +6,9 @@ mod runtime;
 mod state;
 
 use axum::Router;
+use http::{header, Method};
 use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
-use http::{header, Method};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -71,7 +71,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // CORS — allow frontend origin with credentials (cookies)
     let cors = CorsLayer::new()
         .allow_origin(config.cors_origin.clone())
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::PATCH, Method::DELETE])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+        ])
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
         .allow_credentials(true);
 
@@ -92,20 +98,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // drawn here when OPERATOR_SECRET is unset (20a).
     let operator_secret: std::sync::Arc<str> = match config.operator_secret {
         Some(secret) => {
-            tracing::info!("Operator effect endpoints served at /internal/effects with OPERATOR_SECRET");
+            tracing::info!(
+                "Operator effect endpoints served at /internal/effects with OPERATOR_SECRET"
+            );
             secret.into()
         }
         None => {
-            tracing::info!("Operator effect endpoints served at /internal/effects with a per-process secret");
-            format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple()).into()
+            tracing::info!(
+                "Operator effect endpoints served at /internal/effects with a per-process secret"
+            );
+            format!(
+                "{}{}",
+                uuid::Uuid::new_v4().simple(),
+                uuid::Uuid::new_v4().simple()
+            )
+            .into()
         }
     };
 
     // The operator's model (19b): the in-process Claude adapter, keyed by
     // ANTHROPIC_API_KEY as capsule-corp is. The key is never logged.
-    let operator_model = config.anthropic_api_key.map(|key| operator::Model::new(key, config.operator_model.clone()));
+    let operator_model = config
+        .anthropic_api_key
+        .map(|key| operator::Model::new(key, config.operator_model.clone()));
     match &operator_model {
-        Some(model) => tracing::info!(model = model.name(), "Operator model configured (in-process Claude adapter)"),
+        Some(model) => tracing::info!(
+            model = model.name(),
+            "Operator model configured (in-process Claude adapter)"
+        ),
         None => tracing::info!("No ANTHROPIC_API_KEY; the operator cannot think"),
     }
 
@@ -120,11 +140,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let port = config.port;
     let installer: runtime::Installer = {
         let model = operator_model.clone();
-        std::sync::Arc::new(move |session: &mut capsule_corp::sdk::Session<operator::host::Record>| {
-            if let Some(model) = &model {
-                model.install(session);
-            }
-        })
+        std::sync::Arc::new(
+            move |session: &mut capsule_corp::sdk::Session<operator::host::Record>| {
+                if let Some(model) = &model {
+                    model.install(session);
+                }
+            },
+        )
     };
     let runtime = std::sync::Arc::new(runtime::OperatorRuntime::new(
         pool.clone(),
@@ -136,7 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let runtime = std::sync::Arc::clone(&runtime);
         tokio::spawn(async move {
-            let mut every = tokio::time::interval(std::time::Duration::from_secs(20));
+            let mut every = tokio::time::interval(runtime::LEASE_RENEWAL);
             loop {
                 every.tick().await;
                 if let Err(error) = runtime.renew_leases().await {
@@ -152,7 +174,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         uploads_dir: config.uploads_dir,
         cookie_secure: config.cookie_secure,
         llm,
-        auth_limiter: std::sync::Arc::new(app::services::rate_limit::AuthLimiter::new(config.auth_limits)),
+        auth_limiter: std::sync::Arc::new(app::services::rate_limit::AuthLimiter::new(
+            config.auth_limits,
+        )),
         operator_secret: Some(operator_secret),
         operator_model,
         runtime,
@@ -168,7 +192,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await?;
     // Connect info gives the login/signup limiter the peer address (#37).
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }

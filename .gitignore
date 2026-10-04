@@ -28,3 +28,6 @@ dist-ssr
 .env
 .env.*
 !.env.example
+
+# Local uploads (the backend's default UPLOADS_DIR)
+backend/data/

@@ -58,6 +58,11 @@ use uuid::Uuid;
 pub type Installer = Arc<dyn Fn(&mut Session<Record>) + Send + Sync>;
 
 const PRESENT_FAMILY: &str = "learning/present";
+/// How long a dead process keeps a workspace from its successor. Renewed
+/// every `LEASE_RENEWAL` by a live one; short, because every backend
+/// restart during a session is exactly this wait (20e).
+pub const LEASE_TTL: Duration = Duration::from_secs(10);
+pub const LEASE_RENEWAL: Duration = Duration::from_secs(3);
 const WAIT_FAMILY: &str = "learner/wait";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -74,6 +79,10 @@ pub enum OperatorState {
     /// Parked on something the learner cannot answer (the model, with no
     /// provider or uncertain): the host has to settle it.
     Stalled { families: Vec<String> },
+    /// Another process holds the workspace's session lease, usually one
+    /// that died within the last `LEASE_TTL`: the page keeps polling and the
+    /// operator comes back when the lease lapses (20e).
+    Unavailable { why: String },
 }
 
 pub struct OperatorRuntime {
@@ -98,12 +107,7 @@ impl OperatorRuntime {
         installer: Installer,
     ) -> Self {
         Self {
-            host: OperatorHost::new(
-                pool.clone(),
-                database_url,
-                "capsule",
-                Duration::from_secs(60),
-            ),
+            host: OperatorHost::new(pool.clone(), database_url, "capsule", LEASE_TTL),
             pool,
             base_url: base_url.into(),
             secret,
@@ -355,7 +359,17 @@ impl OperatorRuntime {
     /// Where the workspace's operator is, for the learner's page. Settles
     /// first whatever is owed, so a page read is enough to wake it.
     pub async fn state(self: &Arc<Self>, workspace: Uuid) -> Result<OperatorState, OperatorError> {
-        if self.poke(workspace).await? {
+        let thinking = match self.poke(workspace).await {
+            Ok(thinking) => thinking,
+            Err(OperatorError::Leased(_)) => {
+                return Ok(OperatorState::Unavailable {
+                    why: "another process held this workspace's session a moment ago; retrying"
+                        .into(),
+                })
+            }
+            Err(error) => return Err(error),
+        };
+        if thinking {
             return Ok(OperatorState::Thinking);
         }
         let handle = self.open(workspace).await?;

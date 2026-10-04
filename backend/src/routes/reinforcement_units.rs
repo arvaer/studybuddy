@@ -1,9 +1,8 @@
 use axum::{
-    Router,
     extract::{Path, Query, State},
     response::IntoResponse,
     routing::get,
-    Json,
+    Json, Router,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -20,7 +19,7 @@ use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/reinforcement-units",     get(list).post(create))
+        .route("/reinforcement-units", get(list).post(create))
         .route("/reinforcement-units/{id}", get(get_one).patch(update))
 }
 
@@ -36,8 +35,11 @@ async fn create(
     AuthUser(user_id): AuthUser,
     Json(req): Json<CreateRuRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let concept_id = Uuid::parse_str(&req.concept_id)
-        .map_err(|_| HttpError(app::errors::AppError::Validation("invalid concept_id".into())))?;
+    let concept_id = Uuid::parse_str(&req.concept_id).map_err(|_| {
+        HttpError(app::errors::AppError::Validation(
+            "invalid concept_id".into(),
+        ))
+    })?;
 
     let svc = RuService::new(PgRuRepository::new(state.pool.clone()));
     let created = svc.create(user_id, req).await?;
@@ -76,7 +78,9 @@ async fn list(
     Query(q): Query<ListQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
     let svc = RuService::new(PgRuRepository::new(state.pool));
-    Ok(Json(svc.list(user_id, q.concept_id, q.state.as_deref()).await?))
+    Ok(Json(
+        svc.list(user_id, q.concept_id, q.state.as_deref()).await?,
+    ))
 }
 
 async fn get_one(
