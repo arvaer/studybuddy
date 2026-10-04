@@ -5,6 +5,7 @@
 (environment studybuddy-learning
   (grant capability call/model :kind model-call)
   (grant capability learning/present :kind tool :scope "workspaces/{{workspace}}/*")
+  (grant capability learning/assess :kind tool :scope "workspaces/{{workspace}}/*")
   (grant capability learner/wait :kind tool :scope "workspaces/{{workspace}}/*")
   (require constraint max-bytes :kind structural :rule (rule (max-bytes 16384)))
   (budget :evaluator-steps 200000 :boundary-effects 300))

@@ -14,11 +14,16 @@
 //! into another learner's workspace even where the environment let the
 //! capsule name the path.
 //!
-//! One family today, `learning/present`, at `learning.present`. The reply
-//! and the receipt are the same JSON the manual route answers, produced by
-//! the same `ActivityService::create` on one transaction with the receipt:
-//! both land or neither does, and a replayed id answers the receipt and
-//! writes nothing. `learner/attempt` arrives with its caller in 20b.
+//! Two families: `learning/present` at `learning.present`, whose reply and
+//! receipt are the same JSON the manual route answers, produced by the same
+//! `ActivityService::create` on one transaction with the receipt; and
+//! `learning/assess` at `learning.assess` (20f), the operator's assessment
+//! of an attempt, written as the attempt's next `assessments` revision with
+//! method `model` on one transaction with its receipt. Both land or
+//! neither does, and a replayed id answers the receipt and writes nothing.
+//! An assessment that names an attempt this learner does not have answers
+//! a value saying so rather than a refusal, so a slip by the model does not
+//! end the run.
 
 use axum::{
     body::Bytes,
@@ -49,6 +54,8 @@ pub fn router() -> Router<AppState> {
 /// applies it, which is what the request's `capability` must say.
 const PRESENT_PATH: &str = "learning.present";
 const PRESENT_FAMILY: &str = "learning/present";
+const ASSESS_PATH: &str = "learning.assess";
+const ASSESS_FAMILY: &str = "learning/assess";
 
 /// The effect as the connector posts it.
 #[derive(Debug, Deserialize)]
@@ -128,9 +135,11 @@ async fn effect(
         )
             .into_response();
     }
-    if family != PRESENT_PATH {
-        return StatusCode::NOT_FOUND.into_response();
-    }
+    let served = match family.as_str() {
+        PRESENT_PATH => PRESENT_FAMILY,
+        ASSESS_PATH => ASSESS_FAMILY,
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
     let req: EffectRequest = match serde_json::from_slice(&body) {
         Ok(req) => req,
         Err(_) => {
@@ -141,11 +150,8 @@ async fn effect(
                 .into_response();
         }
     };
-    if req.capability != PRESENT_FAMILY {
-        return refused(format!(
-            "{PRESENT_PATH} serves {PRESENT_FAMILY}, not {}",
-            req.capability
-        ));
+    if req.capability != served {
+        return refused(format!("{family} serves {served}, not {}", req.capability));
     }
     if let Some(key) = headers.get("idempotency-key").and_then(|v| v.to_str().ok()) {
         if key != req.id {
@@ -163,8 +169,148 @@ async fn effect(
         Err(e) => return database(e),
     };
 
-    match present(&state, workspace, owner, &req).await {
+    let served = if served == PRESENT_FAMILY {
+        present(&state, workspace, owner, &req).await
+    } else {
+        assess(&state, workspace, owner, &req).await
+    };
+    match served {
         Ok(reply) | Err(reply) => reply,
+    }
+}
+
+/// The scope path as the capsule spells it, checked against the workspace
+/// in the URL: a string, or the segment list the kernel read it from.
+fn scoped_path(workspace: Uuid, path: &Value) -> Result<String, Response> {
+    let path = match path {
+        Value::String(path) => path.clone(),
+        Value::Array(segments) => segments
+            .iter()
+            .map(|s| s.as_str().map(str::to_string))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| refused("path segments must be strings"))?
+            .join("/"),
+        _ => return Err(refused("path must be a string or a list of segments")),
+    };
+    let scope = format!("workspaces/{workspace}/");
+    if !path.starts_with(&scope) {
+        return Err(refused(format!("path is outside {scope}*")));
+    }
+    Ok(path)
+}
+
+/// `[path, attempt-id, outcome, feedback]` (`coach/assess`). Shape errors
+/// are the program's and refuse; a wrong attempt id or outcome word is the
+/// model's and is answered below, not refused.
+fn parse_assess(workspace: Uuid, payload: &[Value]) -> Result<(String, String, String), Response> {
+    let [path, attempt, outcome, feedback] = payload else {
+        return Err(refused(format!(
+            "{ASSESS_FAMILY} takes [path attempt-id outcome feedback]"
+        )));
+    };
+    scoped_path(workspace, path)?;
+    let Some(attempt) = attempt.as_str() else {
+        return Err(refused("attempt-id must be a string"));
+    };
+    let Some(outcome) = outcome.as_str() else {
+        return Err(refused("outcome must be a string"));
+    };
+    let Some(feedback) = feedback.as_str() else {
+        return Err(refused("feedback must be a string"));
+    };
+    Ok((
+        attempt.to_string(),
+        outcome.to_string(),
+        feedback.to_string(),
+    ))
+}
+
+/// The operator's assessment of an attempt, on one transaction with its
+/// receipt. The reply is `{"assessed": true, ...}` with what was written,
+/// or `{"assessed": false, "why"}` when the attempt or the outcome word is
+/// not one this learner has, so the coach reads it and goes on.
+async fn assess(
+    state: &AppState,
+    workspace: Uuid,
+    owner: Uuid,
+    req: &EffectRequest,
+) -> Result<Response, Response> {
+    let mut tx = state.pool.begin().await.map_err(database)?;
+    if let Some(receipt) = receipts::find(&mut *tx, workspace, &req.id)
+        .await
+        .map_err(database)?
+    {
+        return Ok(value(receipt.payload));
+    }
+    let (attempt, outcome_word, feedback) = parse_assess(workspace, &req.payload)?;
+
+    let not_assessed = |why: String| json!({ "assessed": false, "why": why });
+    let payload = match (
+        attempt.parse::<Uuid>().ok(),
+        domain::learning::AssessmentOutcome::parse(&outcome_word),
+    ) {
+        (None, _) => not_assessed(format!("{attempt} is not an attempt id")),
+        (_, None) => not_assessed(format!(
+            "outcome must be correct, partial or incorrect, not {outcome_word}"
+        )),
+        (Some(attempt_id), Some(outcome)) => {
+            // The attempt must be this learner's; an activity the operator
+            // published in this workspace is, and so is any other of theirs.
+            let owned: Option<Uuid> =
+                sqlx::query_scalar("SELECT id FROM attempts WHERE id = $1 AND user_id = $2")
+                    .bind(attempt_id)
+                    .bind(owner)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(database)?;
+            match owned {
+                None => not_assessed(format!("no attempt {attempt_id} for this learner")),
+                Some(_) => {
+                    let score = match outcome {
+                        domain::learning::AssessmentOutcome::Correct => 1.0,
+                        domain::learning::AssessmentOutcome::Partial => 0.5,
+                        domain::learning::AssessmentOutcome::Incorrect => 0.0,
+                    };
+                    sqlx::query(
+                        "INSERT INTO assessments (attempt_id, revision, outcome, method, score, feedback)
+                         SELECT $1, coalesce(max(revision), 0) + 1, ($2::text)::assessment_outcome,
+                                'model'::assessment_method, $3, $4
+                         FROM assessments WHERE attempt_id = $1",
+                    )
+                    .bind(attempt_id)
+                    .bind(outcome.as_str())
+                    .bind(score)
+                    .bind(&feedback)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(database)?;
+                    json!({
+                        "assessed": true,
+                        "attemptId": attempt_id,
+                        "status": outcome.as_str(),
+                        "method": "model",
+                        "feedback": feedback,
+                    })
+                }
+            }
+        }
+    };
+
+    let receipt = Receipt {
+        effect_id: req.id.clone(),
+        workspace_id: workspace,
+        family: ASSESS_FAMILY.to_string(),
+        payload,
+    };
+    match receipts::record(&mut tx, &receipt)
+        .await
+        .map_err(database)?
+    {
+        Recorded::New => {
+            tx.commit().await.map_err(database)?;
+            Ok(value(receipt.payload))
+        }
+        Recorded::Existing(earlier) => Ok(value(earlier.payload)),
     }
 }
 
@@ -180,20 +326,7 @@ fn parse_present(workspace: Uuid, payload: &[Value]) -> Result<CreateActivityReq
             "{PRESENT_FAMILY} takes [path kind prompt answer-key]"
         )));
     };
-    let path = match path {
-        Value::String(path) => path.clone(),
-        Value::Array(segments) => segments
-            .iter()
-            .map(|s| s.as_str().map(str::to_string))
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| refused("path segments must be strings"))?
-            .join("/"),
-        _ => return Err(refused("path must be a string or a list of segments")),
-    };
-    let scope = format!("workspaces/{workspace}/");
-    if !path.starts_with(&scope) {
-        return Err(refused(format!("path is outside {scope}*")));
-    }
+    scoped_path(workspace, path)?;
     let Some(kind) = kind.as_str() else {
         return Err(refused("kind must be a string"));
     };
@@ -483,6 +616,112 @@ mod tests {
         assert_eq!(receipt.family, PRESENT_FAMILY);
         assert_eq!(receipt.payload, published);
         assert_eq!(counts(&pool).await, (2, 2, 1));
+    }
+
+    fn assess_body(id: &str, path: &str, attempt: &str, outcome: &str, feedback: &str) -> Value {
+        json!({ "id": id, "capability": ASSESS_FAMILY, "payload": [path, attempt, outcome, feedback] })
+    }
+
+    fn assess_uri(workspace: Uuid) -> String {
+        format!("/internal/effects/{workspace}/{ASSESS_PATH}")
+    }
+
+    async fn assess_counts(pool: &PgPool) -> (i64, i64) {
+        sqlx::query_as(
+            "SELECT (SELECT count(*) FROM assessments), (SELECT count(*) FROM effect_receipts WHERE family = 'learning/assess')",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    /// The operator's assessment lands as the attempt's assessment, method
+    /// model, with one receipt; a replay writes nothing; an attempt that is
+    /// not this learner's is answered, not refused, and writes nothing.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn the_operator_assesses_an_attempt_once(pool: PgPool) {
+        let user = learner(&pool, "owner@example.com").await;
+        let ws = workspace(&pool, user).await;
+        let app = app(pool.clone(), Some(SECRET)).await;
+        let path = format!("workspaces/{ws}/activities");
+        let (_, published) = send(
+            &app,
+            post(
+                &effect_uri(ws),
+                Some(SECRET),
+                &effect_body("sha256:p1", &path, activity("Define the return.")),
+            ),
+        )
+        .await;
+        let revision: Uuid = published["value"]["current"]["id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let svc = app::services::attempt::AttemptService::new(
+            infra::repositories::attempt::PgAttemptRepository::new(pool.clone()),
+        );
+        let recorded = svc
+            .record(
+                user,
+                app::dtos::attempt::RecordAttemptRequest {
+                    request_key: "k1".into(),
+                    activity_revision_id: revision,
+                    response: json!("the sum of discounted future rewards"),
+                    assistance: vec![],
+                },
+            )
+            .await
+            .unwrap()
+            .receipt;
+        assert_eq!(
+            recorded.status, "pending",
+            "free text waits for the operator"
+        );
+
+        let feedback = "Right: and the discount is $\\gamma$.";
+        let body = assess_body(
+            "sha256:a1",
+            &path,
+            &recorded.attempt_id,
+            "correct",
+            feedback,
+        );
+        let (status, reply) = send(&app, post(&assess_uri(ws), Some(SECRET), &body)).await;
+        assert_eq!(status, StatusCode::OK, "{reply}");
+        assert_eq!(reply["value"]["assessed"], true, "{reply}");
+        let after = svc
+            .get(user, recorded.attempt_id.parse().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(after.status, "correct");
+        let assessment = after.assessment.unwrap();
+        assert_eq!(assessment.method, domain::learning::AssessmentMethod::Model);
+        assert_eq!(assessment.feedback, feedback);
+        assert_eq!(assess_counts(&pool).await, (1, 1));
+
+        // Replay: the same observation, nothing more written.
+        let (_, replay) = send(&app, post(&assess_uri(ws), Some(SECRET), &body)).await;
+        assert_eq!(replay, reply);
+        assert_eq!(assess_counts(&pool).await, (1, 1));
+
+        // Someone else's attempt, or a word that is not an outcome: answered
+        // as not assessed, receipted, and no assessment row.
+        let other = learner(&pool, "other@example.com").await;
+        let other_ws = workspace(&pool, other).await;
+        let foreign = assess_body(
+            "sha256:a2",
+            &format!("workspaces/{other_ws}/activities"),
+            &recorded.attempt_id,
+            "correct",
+            "x",
+        );
+        let (_, denied) = send(&app, post(&assess_uri(other_ws), Some(SECRET), &foreign)).await;
+        assert_eq!(denied["value"]["assessed"], false, "{denied}");
+        let odd = assess_body("sha256:a3", &path, &recorded.attempt_id, "brilliant", "x");
+        let (_, odd) = send(&app, post(&assess_uri(ws), Some(SECRET), &odd)).await;
+        assert_eq!(odd["value"]["assessed"], false, "{odd}");
+        assert_eq!(assess_counts(&pool).await, (1, 3));
     }
 
     #[sqlx::test(migrations = "./migrations")]

@@ -12,23 +12,27 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 async fn learner(pool: &PgPool, email: &str) -> Uuid {
-    sqlx::query_scalar("INSERT INTO users (email, password_hash, display_name) VALUES ($1, 'x', 'L') RETURNING id")
-        .bind(email)
-        .fetch_one(pool)
-        .await
-        .unwrap()
+    sqlx::query_scalar(
+        "INSERT INTO users (email, password_hash, display_name) VALUES ($1, 'x', 'L') RETURNING id",
+    )
+    .bind(email)
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 /// An exact-match activity whose key is "policy".
 async fn revision(pool: &PgPool, user_id: Uuid) -> Uuid {
-    let activity: Uuid = sqlx::query_scalar("INSERT INTO activities (user_id, kind) VALUES ($1, 'recall') RETURNING id")
-        .bind(user_id)
-        .fetch_one(pool)
-        .await
-        .unwrap();
+    let activity: Uuid = sqlx::query_scalar(
+        "INSERT INTO activities (user_id, kind) VALUES ($1, 'recall') RETURNING id",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
     sqlx::query_scalar(
-        "INSERT INTO activity_revisions (activity_id, revision, prompt, answer_key)
-         VALUES ($1, 1, 'Name the mapping from states to actions.', '\"policy\"'::jsonb) RETURNING id",
+        "INSERT INTO activity_revisions (activity_id, revision, prompt, options, answer_key)
+         VALUES ($1, 1, 'Name the mapping from states to actions.', '[\"Policy\", \"Value\"]'::jsonb, '\"Policy\"'::jsonb) RETURNING id",
     )
     .bind(activity)
     .fetch_one(pool)
@@ -36,12 +40,25 @@ async fn revision(pool: &PgPool, user_id: Uuid) -> Uuid {
     .unwrap()
 }
 
-fn req(key: &str, revision_id: Uuid, response: Value, assistance: Vec<Value>) -> RecordAttemptRequest {
-    RecordAttemptRequest { request_key: key.into(), activity_revision_id: revision_id, response, assistance }
+fn req(
+    key: &str,
+    revision_id: Uuid,
+    response: Value,
+    assistance: Vec<Value>,
+) -> RecordAttemptRequest {
+    RecordAttemptRequest {
+        request_key: key.into(),
+        activity_revision_id: revision_id,
+        response,
+        assistance,
+    }
 }
 
 async fn attempts(pool: &PgPool) -> i64 {
-    sqlx::query_scalar("SELECT count(*) FROM attempts").fetch_one(pool).await.unwrap()
+    sqlx::query_scalar("SELECT count(*) FROM attempts")
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -50,10 +67,16 @@ async fn same_key_and_payload_replays_the_receipt(pool: PgPool) {
     let rev = revision(&pool, u).await;
     let svc = AttemptService::new(PgAttemptRepository::new(pool.clone()));
 
-    let first = svc.record(u, req("k", rev, json!("Policy"), vec![json!("hint")])).await.unwrap();
+    let first = svc
+        .record(u, req("k", rev, json!("Policy"), vec![json!("hint")]))
+        .await
+        .unwrap();
     assert!(!first.replayed);
 
-    let again = svc.record(u, req("k", rev, json!("Policy"), vec![json!("hint")])).await.unwrap();
+    let again = svc
+        .record(u, req("k", rev, json!("Policy"), vec![json!("hint")]))
+        .await
+        .unwrap();
     assert!(again.replayed);
     assert_eq!(again.receipt.attempt_id, first.receipt.attempt_id);
     assert_eq!(again.receipt.status, "correct");
@@ -61,7 +84,10 @@ async fn same_key_and_payload_replays_the_receipt(pool: PgPool) {
     assert_eq!(attempts(&pool).await, 1);
 
     // A different key with the same payload is a genuinely new attempt.
-    let other = svc.record(u, req("k2", rev, json!("Policy"), vec![json!("hint")])).await.unwrap();
+    let other = svc
+        .record(u, req("k2", rev, json!("Policy"), vec![json!("hint")]))
+        .await
+        .unwrap();
     assert!(!other.replayed);
     assert_ne!(other.receipt.attempt_id, first.receipt.attempt_id);
     assert_eq!(attempts(&pool).await, 2);
@@ -74,7 +100,11 @@ async fn same_key_with_a_different_payload_is_a_conflict_and_changes_nothing(poo
     let rev2 = revision(&pool, u).await;
     let svc = AttemptService::new(PgAttemptRepository::new(pool.clone()));
 
-    let first = svc.record(u, req("k", rev, json!("Policy"), vec![])).await.unwrap().receipt;
+    let first = svc
+        .record(u, req("k", rev, json!("Policy"), vec![]))
+        .await
+        .unwrap()
+        .receipt;
 
     // Different response, different assistance, different revision: each is refused.
     for bad in [
@@ -83,7 +113,10 @@ async fn same_key_with_a_different_payload_is_a_conflict_and_changes_nothing(poo
         req("k", rev2, json!("Policy"), vec![]),
     ] {
         let res = svc.record(u, bad).await;
-        assert!(matches!(res, Err(AppError::Domain(DomainError::Conflict(_)))), "{res:?}");
+        assert!(
+            matches!(res, Err(AppError::Domain(DomainError::Conflict(_)))),
+            "{res:?}"
+        );
     }
 
     // The original is untouched and still the only attempt.
@@ -95,7 +128,13 @@ async fn same_key_with_a_different_payload_is_a_conflict_and_changes_nothing(poo
             .await
             .unwrap();
     assert_eq!(stored, (json!("Policy"), json!([])));
-    assert_eq!(svc.get(u, first.attempt_id.parse().unwrap()).await.unwrap().status, "correct");
+    assert_eq!(
+        svc.get(u, first.attempt_id.parse().unwrap())
+            .await
+            .unwrap()
+            .status,
+        "correct"
+    );
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -106,15 +145,26 @@ async fn request_keys_are_scoped_per_learner(pool: PgPool) {
     let rev_b = revision(&pool, b).await;
     let svc = AttemptService::new(PgAttemptRepository::new(pool.clone()));
 
-    let mine = svc.record(a, req("shared", rev_a, json!("Policy"), vec![])).await.unwrap();
-    let theirs = svc.record(b, req("shared", rev_b, json!("Policy"), vec![])).await.unwrap();
+    let mine = svc
+        .record(a, req("shared", rev_a, json!("Policy"), vec![]))
+        .await
+        .unwrap();
+    let theirs = svc
+        .record(b, req("shared", rev_b, json!("Policy"), vec![]))
+        .await
+        .unwrap();
     assert!(!mine.replayed && !theirs.replayed);
     assert_ne!(mine.receipt.attempt_id, theirs.receipt.attempt_id);
 
     // B reusing A's key against A's revision is still ownership-refused,
     // not a conflict, and never leaks A's receipt.
-    let res = svc.record(b, req("shared-2", rev_a, json!("Policy"), vec![])).await;
-    assert!(matches!(res, Err(AppError::Domain(DomainError::NotFound(_)))));
+    let res = svc
+        .record(b, req("shared-2", rev_a, json!("Policy"), vec![]))
+        .await;
+    assert!(matches!(
+        res,
+        Err(AppError::Domain(DomainError::NotFound(_)))
+    ));
     assert_eq!(attempts(&pool).await, 2);
 }
 
@@ -141,7 +191,10 @@ async fn concurrent_duplicates_record_exactly_once(pool: PgPool) {
     let tasks: Vec<_> = (0..12)
         .map(|_| {
             let svc = AttemptService::new(PgAttemptRepository::new(pool.clone()));
-            tokio::spawn(async move { svc.record(u, req("race", rev, json!("Policy"), vec![])).await })
+            tokio::spawn(async move {
+                svc.record(u, req("race", rev, json!("Policy"), vec![]))
+                    .await
+            })
         })
         .collect();
 

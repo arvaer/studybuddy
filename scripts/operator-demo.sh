@@ -75,14 +75,17 @@ signup() { api POST /api/auth/signup "" "$(jq -nc --arg e "$1" --arg p "$DEMO_PA
 # The demo account, or an existing one's token; null when the login fails.
 sign_in() { local t; t="$(signup "$1")"; [ "$t" != null ] && [ -n "$t" ] && { printf %s "$t"; return; }; login "$1"; }
 workspace() { api GET "/api/workspaces/$WS" "$A"; }
-# Poll the workspace until the operator is neither thinking nor unreachable
-# (a just-restarted process may find the dead one's lease still held).
+# Poll the workspace until the operator is neither thinking nor unavailable
+# (a just-restarted process finds the dead one's lease held for up to ten
+# seconds and says so, 20e).
 # Prints the body; `waited` answers the seconds it took.
 settled() {
   local started; started="$(date +%s)"
+  local op
   for _ in $(seq 1 600); do
     local body; body="$(workspace)"
-    if [ "$(last_code)" = 200 ] && [ "$(jq -r .operator <<<"$body")" != thinking ]; then
+    op="$(jq -r .operator <<<"$body" 2>/dev/null)"
+    if [ "$(last_code)" = 200 ] && [ "$op" != thinking ] && [ "$op" != unavailable ]; then
       echo $(( $(date +%s) - started )) >"$work/waited"; printf %s "$body"; return
     fi
     sleep 1

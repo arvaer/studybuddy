@@ -9,15 +9,17 @@
   (purpose "keep one activity in front of the learner until the goal is met")
   (use capability call/model :kind model-call)
   (use capability learning/present :kind tool :scope "workspaces/{{workspace}}/*")
+  (use capability learning/assess :kind tool :scope "workspaces/{{workspace}}/*")
   (use capability learner/wait :kind tool :scope "workspaces/{{workspace}}/*")
 
   (define coach/path (quote ("workspaces" "{{workspace}}" "activities")))
 
   (define coach/system
-    "You coach one learner toward the goal they stated. Each turn, call exactly one verb. Present one short activity at a time: a prompt the learner answers in a sentence or two, with the answer you expect. Read each attempt before choosing the next prompt; go deeper where the attempt was weak. When the attempts show the goal is met, finish with a short summary for the learner. Your proposals are not assessments of mastery. Prompts are rendered as Markdown with TeX math: write symbols and formulas between $…$ (or $$…$$ on their own line), never as bare underscores or braces.")
+    "You coach one learner toward the goal they stated. Each turn, call exactly one verb. Present one short activity at a time: a prompt the learner answers in a sentence or two, with the answer you expect. When an attempt comes back, your next call is coach/assess on it: its attemptId, correct, partial or incorrect, and one or two sentences of feedback the learner will read. Then present the next prompt, going deeper where the attempt was weak, or finish with a short summary for the learner when the attempts show the goal is met. Your assessments are of the attempt in front of you, not of mastery. Prompts are rendered as Markdown with TeX math: write symbols and formulas between $…$ (or $$…$$ on their own line), never as bare underscores or braces.")
 
   (define coach/verbs
     (quote ((coach/present "Publish one activity to the learner and wait for their attempt. Answers (\"attempt\" the-attempt).")
+            (coach/assess "Record your assessment of an attempt: its attemptId, an outcome of correct, partial or incorrect, and feedback the learner reads. Answers (\"assessed\" the-attempt).")
             (coach/finish "End the session with a short summary for the learner."))))
 
   ;; Present, then wait for the attempt. Both name coach/path first, which
@@ -27,6 +29,13 @@
       (list "attempt"
             (learner/wait coach/path
               (learning/present coach/path "recall" prompt answer-key)))))
+
+  ;; The assessment is a decision, and a decision is an effect: it goes
+  ;; through the door to the application, which writes it as the attempt's
+  ;; assessment (method model) and answers the attempt as it now reads.
+  (define coach/assess
+    (lambda (attempt-id outcome feedback)
+      (list "assessed" (learning/assess coach/path attempt-id outcome feedback))))
 
   (define coach/finish (lambda (summary) (list "done" summary)))
 

@@ -26,7 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { fetchTopics, fetchConcepts } from "@/lib/api";
-import { fetchActivities, type Activity, type AttemptStatus } from "@/lib/activities";
+import { fetchActivities, type Activity, type AttemptStatus, fetchAttempt, type AttemptReceipt } from "@/lib/activities";
 import { canSetGoal, fetchCurrentWorkspace, fetchWorkspace, setGoal, operatorLine, shouldPoll, type Workspace } from "@/lib/workspace";
 import { Prompt } from "@/components/prompt";
 import { IntentBox } from "@/components/intent-box";
@@ -46,6 +46,13 @@ import type { Topic, Concept } from "@/types/study";
 // which activity is on screen and tallies the accepted statuses it is told
 // about. Nothing here grades, and nothing here knows an answer key.
 
+const STATUS_WORD: Record<AttemptStatus, string> = {
+  correct: "correct",
+  partial: "partially correct",
+  incorrect: "not quite",
+  pending: "awaiting assessment",
+};
+
 export default function QuizPage() {
   const [searchParams] = useSearchParams();
   const initialTopicId = searchParams.get('topicId') || 'all';
@@ -64,6 +71,9 @@ export default function QuizPage() {
   // Accepted statuses by activity id, reported by the cards. Backend state,
   // never computed here.
   const [accepted, setAccepted] = useState<Record<string, AttemptStatus>>({});
+  // The learner's last accepted answer, re-read once the operator settles,
+  // so the coach's assessment of it (20f) is shown above the next activity.
+  const [lastAttempt, setLastAttempt] = useState<AttemptReceipt | null>(null);
   const [isComplete, setIsComplete] = useState(false);
   // The learner's workspace (20a): no goal means the intent box; a goal
   // means the operator's state line, polled while it thinks.
@@ -110,6 +120,14 @@ export default function QuizPage() {
     if (!workspace) return;
     setWorkspace(await setGoal(workspace.id, intent));
   };
+
+  // When the operator stops thinking, the last answer may have been
+  // assessed: read it again.
+  useEffect(() => {
+    if (!lastAttempt || shouldPoll(workspace) || lastAttempt.assessment?.method === "model") return;
+    fetchAttempt(lastAttempt.attemptId).then(setLastAttempt).catch(() => { /* next time */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace?.operator, workspace?.currentActivityId]);
 
   // An accepted answer wakes the operator (20b): ask where it is now, and
   // the polling above carries on while it thinks.
@@ -411,10 +429,21 @@ export default function QuizPage() {
                 exit={{ opacity: 0, x: -20 }}
                 transition={{ duration: 0.2 }}
               >
+                {lastAttempt?.assessment?.method === "model" && lastAttempt.activityRevisionId !== current.current.id && (
+                  <Card className="p-5 mb-4 border-accent/40" data-testid="coach-note">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">
+                      On your last answer · {STATUS_WORD[lastAttempt.status]}
+                    </p>
+                    <div className="text-sm text-foreground">
+                      <Prompt>{lastAttempt.assessment.feedback}</Prompt>
+                    </div>
+                  </Card>
+                )}
                 <ActivityCard
                   revision={current.current}
-                  onAccepted={(status) => {
-                    setAccepted(prev => ({ ...prev, [current.id]: status }));
+                  onAccepted={(receipt) => {
+                    setAccepted(prev => ({ ...prev, [current.id]: receipt.status }));
+                    setLastAttempt(receipt);
                     refreshWorkspace();
                   }}
                 />
