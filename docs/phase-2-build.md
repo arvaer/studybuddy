@@ -1,6 +1,6 @@
 # Phase 2 build plan: the operator loop
 
-October 1, 2026. Scopes the Phase 2 tickets (#18, #19, #20) and the first Phase 3 slices that the operator UX ruling and the guided-reading design call for. Decisions it rests on: [capsule-integration.md](capsule-integration.md), "Revisit after Phase 1" and "Learner UX for Phase 2"; the product in [operator-design.md](operator-design.md); the pedagogy in [learning-design.md](learning-design.md). Capsule pin `4b77dcc`; the working constraints of the hardening plan apply to every ticket.
+October 1, 2026. Scopes the Phase 2 tickets (#18, #19, #20) and the first Phase 3 slices that the operator UX ruling and the guided-reading design call for. Decisions it rests on: [capsule-integration.md](capsule-integration.md), "Revisit after Phase 1" and "Learner UX for Phase 2"; the product in [operator-design.md](operator-design.md); the pedagogy in [learning-design.md](learning-design.md). Capsule pin `7ad7c4b` (first `4b77dcc`; bumped 2026-10-03, see [capsule-integration.md](capsule-integration.md), "Second pin"); the working constraints of the hardening plan apply to every ticket.
 
 ## Why this exists (owner, 2026-10-01)
 

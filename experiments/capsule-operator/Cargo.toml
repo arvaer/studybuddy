@@ -8,5 +8,5 @@ publish = false
 [workspace]
 
 [dev-dependencies]
-capsule-corp = { git = "https://github.com/Prominent-Systems/capsule-corp", rev = "4b77dcce4de6efd8d81b0c671a33851ce353918a" }
+capsule-corp = { git = "https://github.com/Prominent-Systems/capsule-corp", rev = "7ad7c4bfe36b45667a77f222c2a1772ad0a0ae60" }
 serde_json = "1.0.150"

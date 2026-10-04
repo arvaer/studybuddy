@@ -14,7 +14,7 @@ dependencies = [
 [[package]]
 name = "capsule-corp"
 version = "0.1.0"
-source = "git+https://github.com/Prominent-Systems/capsule-corp?rev=4b77dcce4de6efd8d81b0c671a33851ce353918a#4b77dcce4de6efd8d81b0c671a33851ce353918a"
+source = "git+https://github.com/Prominent-Systems/capsule-corp?rev=7ad7c4bfe36b45667a77f222c2a1772ad0a0ae60#7ad7c4bfe36b45667a77f222c2a1772ad0a0ae60"
 dependencies = [
  "serde",
  "serde_json",
