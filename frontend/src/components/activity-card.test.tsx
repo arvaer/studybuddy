@@ -196,6 +196,23 @@ describe("ActivityCard", () => {
     expect(editor.dom.querySelector(".tok-comment")?.textContent).toBe("# one");
   });
 
+  it("formats from the toolbar and its shortcuts, and hides the bar once accepted", async () => {
+    const c = client({ record: vi.fn(async () => ({ receipt: { ...receipt("pending"), response: "**gain** and $x$" }, replayed: false })) });
+    render(<ActivityCard revision={{ ...revision, options: null, hasAnswerKey: false }} deps={{ storage: memoryStorage(), client: c }} />);
+    await waitFor(() => expect(phaseOf()).toBe("draft"));
+    const editor = typeAnswer("gain and ");
+    act(() => editor.dispatch({ selection: { anchor: 0, head: 4 } }));
+    fireEvent.click(screen.getByRole("button", { name: "Bold" }));
+    expect(editor.state.doc.toString()).toBe("**gain** and ");
+    act(() => editor.dispatch({ selection: { anchor: editor.state.doc.length } }));
+    fireEvent.keyDown(editor.contentDOM, { key: "m", ctrlKey: true } /* jsdom is not a Mac: Mod is Ctrl */);
+    expect(editor.state.doc.toString()).toBe("**gain** and $x$");
+
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    await waitFor(() => expect(phaseOf()).toBe("accepted"));
+    expect(screen.queryByRole("toolbar", { name: "Formatting" })).toBeNull();
+  });
+
   it("indents with Tab inside a code fence and leaves Tab alone outside one", async () => {
     render(<ActivityCard revision={{ ...revision, options: null, hasAnswerKey: false }} deps={{ storage: memoryStorage(), client: client() }} />);
     await waitFor(() => expect(phaseOf()).toBe("draft"));
