@@ -2,20 +2,24 @@
 // renders in place as you write it and turns back into source when the
 // cursor enters it. `$` pairs itself (backticks do not, so a ``` fence
 // types cleanly); code fences read as code and take Tab as an indent;
-// everywhere else Tab leaves the box as usual.
+// everywhere else Tab leaves the box as usual. A bar along the bottom
+// offers every format as a button, each with its shortcut.
 import { useEffect, useRef } from "react";
+import type { LucideIcon } from "lucide-react";
+import { Bold, Code, Italic, List, ListOrdered, Sigma, SquareCode, SquareSigma } from "lucide-react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { Compartment, EditorState, RangeSetBuilder, StateField, type Range } from "@codemirror/state";
+import { Compartment, EditorState, RangeSetBuilder, StateField, type Range, type TransactionSpec } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, keymap, placeholder as placeholderExt, type DecorationSet } from "@codemirror/view";
 import { classHighlighter, tags } from "@lezer/highlight";
 import type { MarkdownConfig } from "@lezer/markdown";
 import { codeLanguage } from "@/lib/code-languages";
 import { codeRanges, mathSpans } from "@/lib/math-spans";
+import { block, list, wrap } from "@/lib/markdown-commands";
 
 class MathWidget extends WidgetType {
   constructor(readonly tex: string, readonly display: boolean) {
@@ -34,6 +38,51 @@ class MathWidget extends WidgetType {
     return false;
   }
 }
+
+interface Format {
+  label: string;
+  icon: LucideIcon;
+  /// CodeMirror key name; Mod is Cmd on a Mac, Ctrl elsewhere.
+  key: string;
+  run: (state: EditorState) => TransactionSpec;
+}
+
+const FORMATS: Format[][] = [
+  [
+    { label: "Bold", icon: Bold, key: "Mod-b", run: (s) => wrap(s, "**", "bold") },
+    { label: "Italic", icon: Italic, key: "Mod-i", run: (s) => wrap(s, "*", "italic") },
+  ],
+  [
+    { label: "Inline math", icon: Sigma, key: "Mod-m", run: (s) => wrap(s, "$", "x") },
+    { label: "Display math", icon: SquareSigma, key: "Mod-Shift-m", run: (s) => block(s, "$$", "$$", "x") },
+  ],
+  [
+    { label: "Inline code", icon: Code, key: "Mod-e", run: (s) => wrap(s, "`", "code") },
+    { label: "Python block", icon: SquareCode, key: "Mod-Shift-e", run: (s) => block(s, "```python", "```", "") },
+  ],
+  [
+    { label: "Bulleted list", icon: List, key: "Mod-Shift-8", run: (s) => list(s, false) },
+    { label: "Numbered list", icon: ListOrdered, key: "Mod-Shift-7", run: (s) => list(s, true) },
+  ],
+];
+
+const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+
+/// "Mod-Shift-m" as the learner's keyboard shows it.
+function keyLabel(key: string): string {
+  return key
+    .split("-")
+    .map((part) => (part === "Mod" ? (isMac ? "⌘" : "Ctrl") : part === "Shift" ? (isMac ? "⇧" : "Shift") : part.toUpperCase()))
+    .join(isMac ? "" : "+");
+}
+
+function apply(view: EditorView, format: Format) {
+  view.dispatch(view.state.update(format.run(view.state), { scrollIntoView: true, userEvent: "input.format" }));
+  view.focus();
+  return true;
+}
+
+const formatKeys = keymap.of(FORMATS.flat().map((f) => ({ key: f.key, run: (view: EditorView) => apply(view, f) })));
 
 const DOLLAR = 36;
 const BACKSLASH = 92;
@@ -165,6 +214,7 @@ export function MathEditor({ value, onChange, disabled = false, placeholder = ""
           history(),
           closeBrackets(),
           EditorState.languageData.of(() => [{ closeBrackets: { brackets: ["(", "[", "{", "$"], before: ")]}:;>$" } }]),
+          formatKeys,
           tabInFence,
           fenceAtLineStart,
           keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
@@ -203,9 +253,33 @@ export function MathEditor({ value, onChange, disabled = false, placeholder = ""
 
   return (
     <div
-      ref={host}
       className="rounded-md border border-input bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 ring-offset-background"
       data-testid="math-editor"
-    />
+    >
+      <div ref={host} />
+      {!disabled && (
+        <div role="toolbar" aria-label="Formatting" className="flex flex-wrap items-center gap-0.5 border-t border-border px-1.5 py-1">
+          {FORMATS.map((group, g) => (
+            <div key={g} className="flex items-center gap-0.5">
+              {g > 0 && <div className="mx-1 h-4 w-px bg-border" />}
+              {group.map((format) => (
+                <button
+                  key={format.label}
+                  type="button"
+                  aria-label={format.label}
+                  title={`${format.label} (${keyLabel(format.key)})`}
+                  className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  // Keep the editor's selection: the press must not move focus.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => view.current && apply(view.current, format)}
+                >
+                  <format.icon className="h-4 w-4" />
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
