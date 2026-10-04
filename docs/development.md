@@ -62,6 +62,7 @@ cargo build            # compiles SQLx queries against $DATABASE_URL
 cargo test --workspace
 cargo run              # listens on 0.0.0.0:3000; uploads take files up to 200 MB
 cargo run -- audit-artifacts   # compares the artifact catalog with UPLOADS_DIR and exits; see artifacts.md
+cargo run -- wakes <workspace-id>   # one line per wake of the operator: request bytes, turns, reads, token usage, the verb picked (21d)
 ```
 
 ### Backend tests

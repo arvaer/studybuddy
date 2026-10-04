@@ -4,6 +4,7 @@ mod llm;
 mod routes;
 mod runtime;
 mod state;
+mod wakes;
 
 use axum::Router;
 use http::{header, Method};
@@ -38,6 +39,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Database
     let pool = infra::db::create_pool(&config.database_url).await?;
+
+    // `lugia wakes <workspace-id>`: print a workspace's measured wakes
+    // (21d) and exit. Reads only.
+    if std::env::args().nth(1).as_deref() == Some("wakes") {
+        let workspace: uuid::Uuid = std::env::args()
+            .nth(2)
+            .ok_or("usage: lugia wakes <workspace-id>")?
+            .parse()?;
+        wakes::print(&pool, workspace).await?;
+        return Ok(());
+    }
 
     // `lugia audit-artifacts`: compare the artifact catalog with the blob
     // directory and exit (#12). Reports only, never deletes, never migrates.
@@ -141,9 +153,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let installer: runtime::Installer = {
         let model = operator_model.clone();
         std::sync::Arc::new(
-            move |session: &mut capsule_corp::sdk::Session<operator::host::Record>| {
+            move |session: &mut capsule_corp::sdk::Session<operator::host::Record>,
+                  wakes: &wakes::Wakes| {
                 if let Some(model) = &model {
-                    model.install(session);
+                    // The adapter, measured: one `wakes` row per call (21d).
+                    let mut claude = model.provider();
+                    session.provide(
+                        operator::model::FAMILY,
+                        wakes.observe(move |effect: &capsule_corp::sdk::Effect| {
+                            capsule_corp::sdk::Provider::serve(&mut claude, effect)
+                        }),
+                    );
                 }
             },
         )

@@ -51,14 +51,17 @@ use operator::capsule;
 use operator::host::{Install, Record};
 use operator::receipts::{self, Receipt, Recorded};
 use operator::{OperatorError, OperatorHost};
+
+use crate::wakes::{Wake, Wakes};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// What installs the model on a fresh session: `operator::Model::install`
-/// in the server, a scripted provider in tests.
-pub type Installer = Arc<dyn Fn(&mut Session<Record>) + Send + Sync>;
+/// What installs the model on a fresh session: the server wraps
+/// `operator::Model`'s provider with `Wakes::observe` (21d), a test installs
+/// a scripted one. The `Wakes` handle is this workspace's.
+pub type Installer = Arc<dyn Fn(&mut Session<Record>, &Wakes) + Send + Sync>;
 
 const PRESENT_FAMILY: &str = "learning/present";
 const ASSESS_FAMILY: &str = "learning/assess";
@@ -103,6 +106,8 @@ pub struct OperatorRuntime {
     thinking: Mutex<HashSet<Uuid>>,
     /// Effect ids allowed again in this process after an interruption.
     allowed: Mutex<HashSet<String>>,
+    /// Where every measured wake goes; one writer task drains it (21d).
+    wakes: tokio::sync::mpsc::UnboundedSender<Wake>,
 }
 
 impl OperatorRuntime {
@@ -115,6 +120,8 @@ impl OperatorRuntime {
         secret: Arc<str>,
         installer: Installer,
     ) -> Self {
+        let (wakes, rows) = Wakes::channel();
+        tokio::spawn(crate::wakes::write(pool.clone(), rows));
         Self {
             host: OperatorHost::new(pool.clone(), database_url, "capsule", LEASE_TTL),
             pool,
@@ -123,6 +130,7 @@ impl OperatorRuntime {
             installer,
             thinking: Mutex::new(HashSet::new()),
             allowed: Mutex::new(HashSet::new()),
+            wakes,
         }
     }
 
@@ -143,8 +151,9 @@ impl OperatorRuntime {
     async fn open(&self, workspace: Uuid) -> Result<Handle<Record>, OperatorError> {
         let installer = Arc::clone(&self.installer);
         let (base_url, secret) = (self.base_url.clone(), Arc::clone(&self.secret));
+        let wakes = Wakes::new(workspace, self.wakes.clone());
         let install: Install = Box::new(move |session: &mut Session<Record>| {
-            installer(session);
+            installer(session, &wakes);
             for family in [PRESENT_FAMILY, ASSESS_FAMILY, SOURCE_FAMILY] {
                 session.provide(
                     family,

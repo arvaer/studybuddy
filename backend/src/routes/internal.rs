@@ -523,7 +523,10 @@ mod tests {
             format!("{prefix}/{name}"),
             "http://127.0.0.1:1",
             Arc::from(secret),
-            Arc::new(|_: &mut capsule_corp::sdk::Session<operator::host::Record>| {}),
+            Arc::new(
+                |_: &mut capsule_corp::sdk::Session<operator::host::Record>,
+                 _: &crate::wakes::Wakes| {},
+            ),
         ))
     }
 

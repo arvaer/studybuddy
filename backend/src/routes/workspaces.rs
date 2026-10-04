@@ -221,29 +221,34 @@ mod tests {
         drops: Arc<AtomicUsize>,
     ) -> Installer {
         let forms = Mutex::new(forms.into_iter());
-        Arc::new(move |session: &mut Session<Record>| {
-            let models = Arc::clone(&models);
-            let drops = Arc::clone(&drops);
-            let mut forms: Vec<&'static str> = forms.lock().unwrap().clone().collect();
-            session.provide("call/model", move |effect: &Effect| {
-                models.lock().unwrap().push(effect.clone());
-                if drops
-                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
-                    .is_ok()
-                {
-                    return Reply::Unknown("the connection dropped".into());
-                }
-                if forms.is_empty() {
-                    return Reply::Declined("the script is over".into());
-                }
-                let form = forms.remove(0);
-                let form = match latest_attempt(effect) {
-                    Some(id) => form.replace("{{attempt}}", &id),
-                    None => form.to_string(),
-                };
-                Reply::Value(json!({ "form": form }))
-            });
-        })
+        Arc::new(
+            move |session: &mut Session<Record>, wakes: &crate::wakes::Wakes| {
+                let models = Arc::clone(&models);
+                let drops = Arc::clone(&drops);
+                let mut forms: Vec<&'static str> = forms.lock().unwrap().clone().collect();
+                session.provide(
+                    "call/model",
+                    wakes.observe(move |effect: &Effect| {
+                        models.lock().unwrap().push(effect.clone());
+                        if drops
+                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                            .is_ok()
+                        {
+                            return Reply::Unknown("the connection dropped".into());
+                        }
+                        if forms.is_empty() {
+                            return Reply::Declined("the script is over".into());
+                        }
+                        let form = forms.remove(0);
+                        let form = match latest_attempt(effect) {
+                            Some(id) => form.replace("{{attempt}}", &id),
+                            None => form.to_string(),
+                        };
+                        Reply::Value(json!({ "form": form }))
+                    }),
+                );
+            },
+        )
     }
 
     async fn test_database_url(pool: &PgPool) -> String {
@@ -612,6 +617,42 @@ mod tests {
         let again = settled(&app, user, &ws).await;
         assert_eq!(again["operator"], "idle");
         assert_eq!(models.lock().unwrap().len(), 5);
+
+        // Every wake was measured (21d): five rows, what each picked, the
+        // conversation growing turn by turn.
+        let wakes: Vec<(i32, String, i32)> = {
+            let mut rows = Vec::new();
+            for _ in 0..50 {
+                rows = sqlx::query_as(
+                    "SELECT turns, picked, request_bytes FROM wakes WHERE workspace_id = $1::uuid ORDER BY woke_at",
+                )
+                .bind(&ws)
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+                if rows.len() == 5 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            rows
+        };
+        let picked: Vec<&str> = wakes.iter().map(|(_, p, _)| p.as_str()).collect();
+        assert_eq!(
+            picked,
+            [
+                "coach/present",
+                "coach/assess",
+                "coach/present",
+                "coach/assess",
+                "coach/finish"
+            ]
+        );
+        assert_eq!(
+            wakes.iter().map(|(t, _, _)| *t).collect::<Vec<_>>(),
+            [0, 1, 2, 3, 4]
+        );
+        assert!(wakes.windows(2).all(|w| w[1].2 > w[0].2), "{wakes:?}");
         runtime.close(ws.parse().unwrap()).await.unwrap();
     }
 
