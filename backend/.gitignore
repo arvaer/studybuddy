@@ -9,5 +9,6 @@ target
 # Contains mutation testing data
 **/mutants.out*/arget
 
-# PDFium, fetched by scripts/fetch-pdfium.sh
+# PDFium, fetched by scripts/fetch-pdfium.sh (a directory or a symlink)
+lib
 lib/
