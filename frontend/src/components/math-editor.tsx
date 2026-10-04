@@ -13,6 +13,7 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { Compartment, EditorState, RangeSetBuilder, StateField, type Range } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, keymap, placeholder as placeholderExt, type DecorationSet } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
+import type { MarkdownConfig } from "@lezer/markdown";
 import { codeRanges, mathSpans } from "@/lib/math-spans";
 
 class MathWidget extends WidgetType {
@@ -32,6 +33,33 @@ class MathWidget extends WidgetType {
     return false;
   }
 }
+
+const DOLLAR = 36;
+const BACKSLASH = 92;
+
+/// `$…$` and `$$…$$` as one inline node to the Markdown parser, so the
+/// underscores and stars of TeX are not read as emphasis.
+const texInMarkdown: MarkdownConfig = {
+  defineNodes: ["TeX"],
+  parseInline: [
+    {
+      name: "TeX",
+      before: "Emphasis",
+      parse(cx, next, pos) {
+        if (next !== DOLLAR) return -1;
+        const fence = cx.char(pos + 1) === DOLLAR ? 2 : 1;
+        for (let i = pos + fence; i < cx.end; i++) {
+          const c = cx.char(i);
+          if (c === BACKSLASH) i++;
+          else if (c === DOLLAR && (fence === 1 || cx.char(i + 1) === DOLLAR)) {
+            return cx.addElement(cx.elt("TeX", pos, i + fence));
+          }
+        }
+        return -1;
+      },
+    },
+  ],
+};
 
 const codeLine = Decoration.line({ class: "cm-code-line" });
 
@@ -139,7 +167,7 @@ export function MathEditor({ value, onChange, disabled = false, placeholder = ""
           tabInFence,
           fenceAtLineStart,
           keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
-          markdown(),
+          markdown({ extensions: [texInMarkdown] }),
           syntaxHighlighting(markdownStyle),
           EditorView.lineWrapping,
           livePreview,

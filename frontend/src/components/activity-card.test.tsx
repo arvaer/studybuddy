@@ -5,6 +5,7 @@ import { ApiError } from "@/lib/api";
 import type { AttemptReceipt, Revision } from "@/lib/activities";
 import { memoryStorage, type AttemptClient } from "@/lib/attempt-state";
 import { EditorView } from "@codemirror/view";
+import { syntaxTree } from "@codemirror/language";
 
 const revision: Revision = {
   id: "rev-1",
@@ -167,6 +168,19 @@ describe("ActivityCard", () => {
     expect(c.record).toHaveBeenCalledWith(expect.objectContaining({ response: answer }));
     expect(screen.getByTestId("accepted-answer").querySelector(".katex")).toBeTruthy();
     expect(screen.queryByLabelText("Your answer")).toBeNull();
+  });
+
+  it("does not read the underscores of TeX as Markdown emphasis", async () => {
+    render(<ActivityCard revision={{ ...revision, options: null, hasAnswerKey: false }} deps={{ storage: memoryStorage(), client: client() }} />);
+    await waitFor(() => expect(phaseOf()).toBe("draft"));
+    const editor = typeAnswer("$$\\mathbb{E}_\\pi[G]$$\nso $v_\\pi$ and _this_ is emphasis");
+    const emphasis: string[] = [];
+    syntaxTree(editor.state).iterate({
+      enter: (n) => {
+        if (n.name === "Emphasis") emphasis.push(editor.state.sliceDoc(n.from, n.to));
+      },
+    });
+    expect(emphasis).toEqual(["_this_"]);
   });
 
   it("indents with Tab inside a code fence and leaves Tab alone outside one", async () => {
