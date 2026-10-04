@@ -117,6 +117,7 @@ mod tests {
     use operator::host::Record;
     use serde_json::{json, Value};
     use sqlx::PgPool;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
     use tower::ServiceExt;
@@ -134,12 +135,30 @@ mod tests {
 
     /// A scripted model answering `forms` in order and keeping each request.
     fn scripted(models: Calls, forms: Vec<&'static str>) -> Installer {
+        scripted_dropping(models, forms, Arc::new(AtomicUsize::new(0)))
+    }
+
+    /// The same, but while `drops` is above zero each call answers
+    /// `unknown` (the connection dropped) and takes one off: the adapter
+    /// after its retries, or the process dying mid-call.
+    fn scripted_dropping(
+        models: Calls,
+        forms: Vec<&'static str>,
+        drops: Arc<AtomicUsize>,
+    ) -> Installer {
         let forms = Mutex::new(forms.into_iter());
         Arc::new(move |session: &mut Session<Record>| {
             let models = Arc::clone(&models);
+            let drops = Arc::clone(&drops);
             let mut forms: Vec<&'static str> = forms.lock().unwrap().clone().collect();
             session.provide("call/model", move |effect: &Effect| {
                 models.lock().unwrap().push(effect.clone());
+                if drops
+                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                    .is_ok()
+                {
+                    return Reply::Unknown("the connection dropped".into());
+                }
                 if forms.is_empty() {
                     return Reply::Declined("the script is over".into());
                 }
@@ -484,6 +503,104 @@ mod tests {
         let again = settled(&app, user, &ws).await;
         assert_eq!(again["operator"], "idle");
         assert_eq!(models.lock().unwrap().len(), 3);
+        runtime.close(ws.parse().unwrap()).await.unwrap();
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn an_interrupted_think_is_resumed_once_per_process(pool: PgPool) {
+        // The first call to the model is lost: the adapter's retries are
+        // spent, or the process died mid-call. The run parks on
+        // `call/model` with nothing to complete it from.
+        let models = Calls::default();
+        let drops = Arc::new(AtomicUsize::new(1));
+        let (app, runtime) = serve(
+            &pool,
+            scripted_dropping(models.clone(), vec![FIRST, FOLLOW_UP], Arc::clone(&drops)),
+        )
+        .await;
+        let user = learner(&pool, "d@x.test").await;
+        let (_, current) = call(&app, "GET", "/api/workspaces/current", user, None).await;
+        let ws = current["id"].as_str().unwrap().to_string();
+        let (status, _) = call(
+            &app,
+            "POST",
+            &format!("/api/workspaces/{ws}/goal"),
+            user,
+            Some(json!({ "intent": "Understand the return and discounting in RL." })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+
+        // The next page read allows the park again and the think goes on:
+        // the model is asked the same thing a second time, and the first
+        // activity lands.
+        let first = settled(&app, user, &ws).await;
+        assert_eq!(first["operator"], "waiting", "{first}");
+        let first_activity = first["currentActivityId"].as_str().unwrap().to_string();
+        {
+            let models = models.lock().unwrap();
+            assert_eq!(models.len(), 2, "one lost call, one allowed again");
+            assert_eq!(
+                models[0].payload(),
+                models[1].payload(),
+                "the same request, under the same id"
+            );
+        }
+        let (parks,): (i64,) = sqlx::query_as("SELECT count(*) FROM activities WHERE user_id = $1")
+            .bind(user)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(parks, 1, "no duplicate activity");
+
+        // The connection drops again on the follow-up, twice. The park is
+        // allowed once in this process; the second failure stays stalled,
+        // so a broken model is not called on every poll.
+        drops.store(2, Ordering::SeqCst);
+        let first_revision = revision_of(&pool, &first_activity).await;
+        let answer = json!({
+            "requestKey": "attempt-1",
+            "activityRevisionId": first_revision,
+            "response": "the discounted sum of future rewards"
+        });
+        let (status, _) = call(&app, "POST", "/api/attempts", user, Some(answer)).await;
+        assert_eq!(status, StatusCode::CREATED);
+        let stalled = settled(&app, user, &ws).await;
+        assert_eq!(stalled["operator"], "stalled", "{stalled}");
+        assert_eq!(stalled["families"], json!(["call/model"]));
+        let before = models.lock().unwrap().len();
+        assert_eq!(before, 4, "wake, allowed once, both dropped");
+        let again = settled(&app, user, &ws).await;
+        assert_eq!(again["operator"], "stalled", "{again}");
+        assert_eq!(
+            models.lock().unwrap().len(),
+            before,
+            "a poll asks the model nothing more"
+        );
+
+        // A new process: the first read after reopen allows it once more,
+        // the model answers, the follow-up lands, and nothing is duplicated.
+        runtime.close(ws.parse().unwrap()).await.unwrap();
+        let (app, runtime) = serve(
+            &pool,
+            scripted_dropping(models.clone(), vec![FOLLOW_UP], Arc::clone(&drops)),
+        )
+        .await;
+        let resumed = settled(&app, user, &ws).await;
+        assert_eq!(resumed["operator"], "waiting", "{resumed}");
+        assert_ne!(resumed["currentActivityId"], first_activity);
+        assert_eq!(
+            models.lock().unwrap().len(),
+            5,
+            "allowed once more after the restart"
+        );
+        let (activities,): (i64,) =
+            sqlx::query_as("SELECT count(*) FROM activities WHERE user_id = $1")
+                .bind(user)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(activities, 2);
         runtime.close(ws.parse().unwrap()).await.unwrap();
     }
 }
