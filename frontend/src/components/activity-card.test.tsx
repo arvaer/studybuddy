@@ -148,6 +148,13 @@ describe("ActivityCard", () => {
     expect(screen.getByText(/Source · p\. 58/)).toBeTruthy();
     await waitFor(() => expect(screen.getByText(/restriction on the state/)).toBeTruthy());
     expect(loadPage).toHaveBeenCalledWith("res-1", 58);
+    // Once the drawn page arrives it replaces the text; the text stays a click away.
+    const img = screen.getByAltText("Page 58 of the source") as HTMLImageElement;
+    expect(img.getAttribute("src")).toBe("/api/resources/res-1/pages/58/image");
+    fireEvent.load(img);
+    expect(screen.queryByText(/restriction on the state/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "text" }));
+    expect(screen.getByText(/restriction on the state/)).toBeTruthy();
     // An uncited revision shows no passage.
     const { container } = render(<ActivityCard revision={{ ...revision, id: "rev-u" }} deps={{ storage: memoryStorage(), client: c }} />);
     expect(container.querySelector("[data-testid=source-passage]")).toBeNull();

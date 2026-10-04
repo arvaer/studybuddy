@@ -35,6 +35,7 @@ pub fn router() -> Router<AppState> {
         .route("/resources/{id}/content", get(get_content))
         .route("/resources/{id}/pages", get(get_pages))
         .route("/resources/{id}/file", get(get_file))
+        .route("/resources/{id}/pages/{page}/image", get(get_page_image))
 }
 
 #[derive(Deserialize)]
@@ -263,6 +264,47 @@ async fn get_file(
     };
 
     Ok(([(axum::http::header::CONTENT_TYPE, content_type)], bytes))
+}
+
+/// Width a cited page is drawn at: about twice the activity card, so the
+/// page stays sharp on a high-density screen.
+const PAGE_IMAGE_WIDTH: u16 = 1600;
+
+/// One page of an owned PDF as a PNG (`page` is 1-based), so an activity
+/// card shows the page as printed without fetching the whole file.
+async fn get_page_image(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path((id, page)): Path<(Uuid, usize)>,
+) -> Result<impl IntoResponse, HttpError> {
+    let not_found = || {
+        HttpError(AppError::Domain(domain::errors::DomainError::NotFound(
+            "page image".into(),
+        )))
+    };
+    let resource = PgResourceRepository::new(state.pool)
+        .find_by_id(id, user_id)
+        .await
+        .map_err(HttpError::from)?;
+    let file_path = resource.file_path.ok_or_else(not_found)?;
+    let index = page.checked_sub(1).ok_or_else(not_found)?;
+    let bytes = tokio::fs::read(&file_path)
+        .await
+        .map_err(|e| HttpError(AppError::Unexpected(format!("read file: {e}"))))?;
+    let png = tokio::task::spawn_blocking(move || {
+        infra::pdf::render_page_png(&bytes, index, PAGE_IMAGE_WIDTH)
+    })
+    .await
+    .map_err(|e| HttpError(AppError::Unexpected(format!("render page: {e}"))))?
+    .ok_or_else(not_found)?;
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, "image/png"),
+            // A resource's file is a stored artifact version; it never changes.
+            (axum::http::header::CACHE_CONTROL, "private, max-age=86400"),
+        ],
+        png,
+    ))
 }
 
 async fn delete_one(
