@@ -14,3 +14,4 @@ serde_json = { workspace = true }
 # The Messages API transport for the in-process Claude adapter (19b); the
 # version capsule-host already pins.
 ureq = { version = "3.4", features = ["json"] }
+tracing = "0.1.44"

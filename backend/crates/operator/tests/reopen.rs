@@ -143,8 +143,11 @@ async fn one_owner_at_a_time_until_the_lease_lapses(pool: PgPool) {
     first.close(ws).await.unwrap();
 }
 
+/// The environment gains a grant (as 20f's `learning/assess` did): the
+/// record under the old one cannot be reopened under the new, so the host
+/// opens a fresh record for the workspace, idle, and the old record stays.
 #[sqlx::test(migrations = "../../migrations")]
-async fn a_changed_environment_is_refused_on_reopen(pool: PgPool) {
+async fn a_changed_environment_opens_a_fresh_record_and_keeps_the_old(pool: PgPool) {
     let ws = workspace(&pool).await;
     let host = OperatorHost::new(
         pool.clone(),
@@ -152,17 +155,64 @@ async fn a_changed_environment_is_refused_on_reopen(pool: PgPool) {
         "capsule",
         Duration::from_secs(30),
     );
-    let quiet = || install(Calls::default(), Calls::default(), vec![]);
-    host.open(ws, ENVIRONMENT, quiet()).await.unwrap();
+    let (models, presents) = (Calls::default(), Calls::default());
+    let handle = host
+        .open(
+            ws,
+            ENVIRONMENT,
+            install(models.clone(), presents.clone(), vec![ASK]),
+        )
+        .await
+        .unwrap();
+    start(&handle);
+    assert_eq!(handle.pending().unwrap().len(), 1);
     host.close(ws).await.unwrap();
-    let widened = ENVIRONMENT.replace("workspaces/rl/*", "workspaces/*");
-    assert!(matches!(
-        host.open(ws, &widened, quiet()).await,
-        Err(OperatorError::Session(_))
-    ));
-    assert_eq!(
-        lease(&pool, ws).await,
-        (None, false),
-        "a refused open holds no lease"
+
+    // One more grant: a different environment address.
+    let grown = ENVIRONMENT.replace(
+        "(grant capability call/model",
+        "(grant capability learning/assess :kind tool :scope \"workspaces/rl/*\")\n  (grant capability call/model",
     );
+    assert_ne!(grown, ENVIRONMENT);
+    let handle = host
+        .open(
+            ws,
+            &grown,
+            install(models.clone(), presents.clone(), vec![ASK]),
+        )
+        .await
+        .expect("a changed environment opens, on a fresh record");
+    assert!(
+        handle.pending().unwrap().is_empty(),
+        "the old park is not carried over"
+    );
+    assert!(handle.runs().unwrap().is_empty());
+    assert_eq!(
+        models.lock().unwrap().len(),
+        1,
+        "no provider asked by the reopen"
+    );
+
+    // Both records are in storage (refs are keyed by a hash of the name):
+    // the old one is still there, and the old environment still opens it.
+    let refs: i64 = sqlx::query_scalar("SELECT count(*) FROM capsule.refs")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(refs, 2, "two session refs");
+    host.close(ws).await.unwrap();
+    let old = host
+        .open(
+            ws,
+            ENVIRONMENT,
+            install(models.clone(), presents.clone(), vec![ASK]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        old.pending().unwrap().len(),
+        1,
+        "the old record is untouched"
+    );
+    host.close(ws).await.unwrap();
 }
