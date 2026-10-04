@@ -420,7 +420,8 @@ export default function QuizPage() {
         </div>
 
         <div className="flex-1 flex items-center justify-center p-8">
-          <div className="w-full max-w-2xl">
+          {/* Wide enough for the card's two columns: reading left, answering right. */}
+          <div className="w-full max-w-6xl">
             <AnimatePresence mode="wait">
               <motion.div
                 key={current.current.id}
@@ -447,14 +448,6 @@ export default function QuizPage() {
                     refreshWorkspace();
                   }}
                 />
-                {current.current.sourceArtifactId && (
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    Source:{' '}
-                    <a className="underline" href={`/api/artifacts/${current.current.sourceArtifactId}/bytes`} target="_blank" rel="noreferrer">
-                      open the cited version
-                    </a>
-                  </p>
-                )}
               </motion.div>
             </AnimatePresence>
           </div>
