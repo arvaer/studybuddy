@@ -392,7 +392,7 @@ mod tests {
         assert_eq!(
             models.lock().unwrap()[0].payload()[0][3],
             intent,
-            "the goal is the model's task"
+            "the goal is the model's task (no sources yet)"
         );
 
         // No second goal while the operator is on this one.
@@ -769,6 +769,67 @@ mod tests {
             models.lock().unwrap()[2].payload()[0][3],
             "Now the Bellman equation."
         );
+        runtime.close(ws.parse().unwrap()).await.unwrap();
+    }
+
+    /// The coach is told the learner's sources with the goal and may read
+    /// their pages before presenting (21a): the read's answer is in the
+    /// next turn, and the activity lands as before.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn the_coach_reads_the_source_before_presenting(pool: PgPool) {
+        let models = Calls::default();
+        let user = learner(&pool, "g@x.test").await;
+        let topic: Uuid =
+            sqlx::query_scalar("INSERT INTO topics (user_id, name) VALUES ($1, 'RL') RETURNING id")
+                .bind(user)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let book: Uuid = sqlx::query_scalar(
+            "INSERT INTO resources (user_id, topic_id, title, resource_type, content_pages)
+             VALUES ($1, $2, 'Sutton & Barto', 'pdf', $3) RETURNING id",
+        )
+        .bind(user)
+        .bind(topic)
+        .bind(json!([
+            "Chapter 3: Finite MDPs.",
+            "The return G_t is defined as..."
+        ]))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let read: &'static str =
+            Box::leak(format!(r#"(coach/read "{book}" 2 2)"#).into_boxed_str());
+        let (app, runtime) = serve(&pool, scripted(models.clone(), vec![read, FIRST])).await;
+        let (_, current) = call(&app, "GET", "/api/workspaces/current", user, None).await;
+        let ws = current["id"].as_str().unwrap().to_string();
+        call(
+            &app,
+            "POST",
+            &format!("/api/workspaces/{ws}/goal"),
+            user,
+            Some(json!({ "intent": "Understand the return." })),
+        )
+        .await;
+        let first = settled(&app, user, &ws).await;
+        assert_eq!(first["operator"], "waiting", "{first}");
+        {
+            let models = models.lock().unwrap();
+            assert_eq!(models.len(), 2, "read, then present");
+            let task = models[0].payload()[0][3].as_str().unwrap();
+            assert!(task.starts_with("Understand the return."), "{task}");
+            assert!(
+                task.contains(&format!("- {book}: Sutton & Barto, 2 pages")),
+                "{task}"
+            );
+            let pages = &models[1].payload()[0][4][0][1][0];
+            assert_eq!(pages[0], "pages", "{pages}");
+            assert_eq!(pages[1]["pages"][0]["page"], 2);
+            assert_eq!(
+                pages[1]["pages"][0]["text"],
+                "The return G_t is defined as..."
+            );
+        }
         runtime.close(ws.parse().unwrap()).await.unwrap();
     }
 }
