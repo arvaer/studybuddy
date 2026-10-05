@@ -90,6 +90,18 @@ Filed now so the Phase 2 work keeps their data in reach; built after 20d. Owner,
 | **Wake context, recorded** | Each wake's handed-in context becomes a node the gate reader prints beside the operator's decision, so the context policy is chosen from records rather than opinion. The first consumer is gate 3. |
 | **Delayed re-tests** | Items answered with assistance or recently return unaided at preselected times via the clock-source park and timekeeper (T1, T2). |
 
+## Gate 3: goals side by side
+
+Owner, 2026-10-04: navigator first, then several goals in one workspace, then delayed re-tests (#60), then the gate 3 demo. Each goal is its own run of the coach on the workspace's one record; the record says which run a park belongs to (its origin), so no capsule change is needed and "which goal did this activity serve" is read from the record.
+
+| Ticket | Slice | Done when |
+| --- | --- | --- |
+| **22a Goals side by side** | A goal may be set at any time, beside the others. `goal_runs` ties each goal to its run's form, with the task kept before the run starts so the run can be named again after a crash (`run_once` with the same id and task answers the run it made and writes nothing), and how it ended. `GET /api/workspaces/{id}` adds `goals: [{id, revision, intent, operator, currentActivityId?, summary?}]`, read from the parks under each goal's origin; a goal set while another thinks starts on the next read. Goals set before 22a are adopted from the record. One think at a time per workspace. Built 2026-10-04. | Answering one goal's activity wakes that goal's run only. |
+| **22b Goal chips** | A quiet row of goal chips above the card, the current one marked, `+` opening the intent box in place; a chip shows that goal's activity or its summary. The single-goal fields go. | The learner switches goals without leaving the page. |
+| **22c Goal reader** | `lugia goals <workspace>`: each published activity with the goal it served, from the record, and the verb picked. The first half of the gate 3 reader. | Anyone can see which goal each activity served. |
+
+Known limits: the reading signal (21c) goes to whichever goal is answered next; goals do not know about each other.
+
 ## Not in this plan
 
 Row-level security (#31, deferred). Mastery, due dates, streaks (#14 stands). Exports. Generated interfaces. Web research. Code execution. Multiple owners per session or multi-process deployment: one backend process holds every lease; the lease row is what makes a second process refuse, not scale.
