@@ -44,8 +44,7 @@ export function IntentBox({ onSubmit, title = "What do you want to learn?" }: In
         }}
       />
       {error && <p className="text-sm text-unstable">{error}</p>}
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">The operator reads this and puts the first activity in front of you.</p>
+      <div className="flex items-center justify-end">
         <Button onClick={() => void submit()} disabled={busy || !intent.trim()}>
           {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
           Go

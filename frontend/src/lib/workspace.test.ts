@@ -1,34 +1,66 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { canSetGoal, operatorLine, setGoal, shouldPoll, type Workspace } from "./workspace";
+import { operatorLine, selectedGoal, setGoal, shouldPoll, shownGoals, type GoalState, type Workspace } from "./workspace";
 
-const base: Workspace = {
-  id: "ws-1",
-  goal: { id: "g1", workspaceId: "ws-1", revision: 1, intent: "Learn returns", createdAt: "2026-10-03T00:00:00Z" },
+const goal = (revision: number, view: Partial<GoalState> = {}): GoalState => ({
+  id: `g${revision}`,
+  workspaceId: "ws-1",
+  revision,
+  intent: `Goal ${revision}`,
+  createdAt: "2026-10-03T00:00:00Z",
   operator: "idle",
-};
+  ...view,
+});
+
+const workspace = (goals: GoalState[], view: Partial<Workspace> = {}): Workspace => ({
+  id: "ws-1",
+  goal: goals.at(-1) ?? null,
+  goals,
+  operator: "idle",
+  ...view,
+});
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("operator line", () => {
-  it("says nothing before a goal exists", () => {
-    expect(operatorLine({ ...base, goal: null })).toBeNull();
-    expect(shouldPoll({ ...base, goal: null, operator: "thinking" })).toBe(false);
+  it("names each phase of a goal's run", () => {
+    expect(operatorLine({ operator: "thinking" })).toMatch(/thinking/);
+    expect(operatorLine({ operator: "waiting", currentActivityId: "a1" })).toMatch(/your answer/);
+    expect(operatorLine({ operator: "unavailable", why: "leased" })).toMatch(/coming back/);
+    expect(operatorLine({ operator: "stalled", families: ["call/model"] })).toContain("call/model");
+    expect(operatorLine({ operator: "idle", last: "refused: x" })).toContain("stopped");
+    expect(operatorLine({ operator: "idle", last: "done", summary: "Well done." })).toMatch(/finished/);
+  });
+});
+
+describe("polling", () => {
+  it("asks again while the operator or any goal thinks, never before a goal", () => {
+    expect(shouldPoll(null)).toBe(false);
+    expect(shouldPoll(workspace([], { operator: "thinking" }))).toBe(false);
+    expect(shouldPoll(workspace([goal(1, { operator: "waiting" })]))).toBe(false);
+    expect(shouldPoll(workspace([goal(1, { operator: "waiting" })], { operator: "thinking" }))).toBe(true);
+    expect(shouldPoll(workspace([goal(1, { operator: "waiting" }), goal(2, { operator: "thinking" })]))).toBe(true);
+    expect(shouldPoll(workspace([goal(1, { operator: "unavailable" })], { operator: "unavailable" }))).toBe(true);
+  });
+});
+
+describe("goals on screen", () => {
+  const stopped = goal(1, { last: "set before goals ran side by side" });
+  const finished = goal(2, { last: "done", summary: "You can define the return." });
+  const waiting = goal(3, { operator: "waiting", currentActivityId: "a3" });
+  const thinking = goal(4, { operator: "thinking" });
+  const ws = workspace([stopped, finished, waiting, thinking]);
+
+  it("shows goals still going and finished ones, not ones that stopped with nothing to show", () => {
+    expect(shownGoals(ws, null).map((g) => g.id)).toEqual(["g2", "g3", "g4"]);
+    expect(shownGoals(ws, "g1").map((g) => g.id)).toEqual(["g1", "g2", "g3", "g4"]);
   });
 
-  it("names each phase and polls only while thinking", () => {
-    expect(operatorLine({ ...base, operator: "thinking" })).toMatch(/thinking/);
-    expect(operatorLine({ ...base, operator: "waiting", currentActivityId: "a1" })).toMatch(/your answer/);
-    expect(operatorLine({ ...base, operator: "unavailable", why: "leased" })).toMatch(/coming back/);
-    expect(shouldPoll({ ...base, operator: "unavailable" })).toBe(true);
-    expect(operatorLine({ ...base, operator: "stalled", families: ["call/model"] })).toContain("call/model");
-    expect(operatorLine({ ...base, operator: "idle", last: "refused: x" })).toContain("stopped");
-    expect(operatorLine({ ...base, operator: "idle", last: "done", summary: "Well done." })).toMatch(/finished/);
-    expect(canSetGoal({ ...base, operator: "idle", summary: "Well done." })).toBe(true);
-    expect(canSetGoal({ ...base, operator: "waiting" })).toBe(false);
-    expect(canSetGoal({ ...base, goal: null, operator: "idle" })).toBe(true);
-    expect(shouldPoll({ ...base, operator: "thinking" })).toBe(true);
-    expect(shouldPoll({ ...base, operator: "waiting" })).toBe(false);
-    expect(shouldPoll(null)).toBe(false);
+  it("keeps the learner's pick, else the newest goal still going, else the newest", () => {
+    expect(selectedGoal(ws, "g3")?.id).toBe("g3");
+    expect(selectedGoal(ws, null)?.id).toBe("g4");
+    expect(selectedGoal(ws, "gone")?.id).toBe("g4");
+    expect(selectedGoal(workspace([stopped, finished]), null)?.id).toBe("g2");
+    expect(selectedGoal(workspace([]), null)).toBeNull();
   });
 });
 
@@ -37,13 +69,13 @@ describe("setGoal", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 202,
-      json: () => Promise.resolve({ ...base, operator: "thinking" }),
+      json: () => Promise.resolve(workspace([goal(1, { operator: "thinking" })], { operator: "thinking" })),
     } as Response);
     vi.stubGlobal("fetch", fetchMock);
 
     const ws = await setGoal("ws-1", "Learn returns");
 
-    expect(ws.operator).toBe("thinking");
+    expect(ws.goals[0].operator).toBe("thinking");
     expect(fetchMock).toHaveBeenCalledWith("/api/workspaces/ws-1/goal", expect.objectContaining({
       method: "POST",
       body: JSON.stringify({ intent: "Learn returns" }),

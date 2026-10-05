@@ -27,9 +27,10 @@ import {
 } from "@/components/ui/select";
 import { fetchTopics, fetchConcepts } from "@/lib/api";
 import { fetchActivities, type Activity, type AttemptStatus, fetchAttempt, type AttemptReceipt } from "@/lib/activities";
-import { canSetGoal, fetchCurrentWorkspace, fetchWorkspace, setGoal, operatorLine, shouldPoll, type Workspace } from "@/lib/workspace";
+import { fetchCurrentWorkspace, fetchWorkspace, isOpen, operatorLine, selectedGoal, setGoal, shouldPoll, shownGoals, type Workspace } from "@/lib/workspace";
 import { Prompt } from "@/components/prompt";
 import { IntentBox } from "@/components/intent-box";
+import { GoalChips } from "@/components/goal-chips";
 import { ActivityCard } from "@/components/activity-card";
 import { QuizAiChat } from "@/components/quiz-ai-chat";
 import {
@@ -75,9 +76,14 @@ export default function QuizPage() {
   // so the coach's assessment of it (20f) is shown above the next activity.
   const [lastAttempt, setLastAttempt] = useState<AttemptReceipt | null>(null);
   const [isComplete, setIsComplete] = useState(false);
-  // The learner's workspace (20a): no goal means the intent box; a goal
-  // means the operator's state line, polled while it thinks.
+  // The learner's workspace (20a): no goal means the intent box; goals
+  // mean a chip row (22b) and the chosen goal's state line, polled while
+  // the operator thinks.
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  // The goal the learner picked from the chips; null follows the newest
+  // goal still going. `adding` is the + chip's intent box.
+  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,8 +124,13 @@ export default function QuizPage() {
 
   const startGoal = async (intent: string) => {
     if (!workspace) return;
-    setWorkspace(await setGoal(workspace.id, intent));
+    const next = await setGoal(workspace.id, intent);
+    setWorkspace(next);
+    setSelectedGoalId(next.goal?.id ?? null);
+    setAdding(false);
   };
+
+  const goal = workspace ? selectedGoal(workspace, selectedGoalId) : null;
 
   // When the operator stops thinking, the last answer may have been
   // assessed: read it again.
@@ -127,16 +138,16 @@ export default function QuizPage() {
     if (!lastAttempt || shouldPoll(workspace) || lastAttempt.assessment?.method === "model") return;
     fetchAttempt(lastAttempt.attemptId).then(setLastAttempt).catch(() => { /* next time */ });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace?.operator, workspace?.currentActivityId]);
+  }, [workspace?.operator, goal?.currentActivityId]);
 
   // An accepted answer wakes the operator (20b): ask where it is now, and
   // the polling above carries on while it thinks.
   const refreshWorkspace = () => {
-    if (!workspace?.goal) return;
+    if (!workspace?.goals.length) return;
     fetchWorkspace(workspace.id).then(setWorkspace).catch(() => { /* next read */ });
   };
 
-  const operatorStatus = workspace ? operatorLine(workspace) : null;
+  const operatorStatus = goal ? operatorLine(goal) : null;
 
   const availableConcepts = useMemo(() => {
     if (selectedTopicId === 'all') return allConcepts;
@@ -154,16 +165,18 @@ export default function QuizPage() {
     });
   }, [selectedTopicId, selectedConceptId, activities, allConcepts]);
 
-  // When the operator publishes, put its activity on screen.
+  // When the operator publishes for the goal on screen, or the learner
+  // picks a goal, put that goal's activity on screen.
   useEffect(() => {
-    const id = workspace?.operator === "waiting" ? workspace.currentActivityId : null;
+    const id = goal?.operator === "waiting" ? goal.currentActivityId : null;
     if (!id) return;
     const index = filtered.findIndex((a) => a.id === id);
     if (index >= 0) {
       setCurrentIndex(index);
       setIsComplete(false);
     }
-  }, [filtered, workspace]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, workspace, selectedGoalId]);
 
   // A filter change starts the walk over. Accepted statuses are kept: they
   // are the backend's, and the card will show them again anyway.
@@ -261,7 +274,17 @@ export default function QuizPage() {
     );
   }
 
-  if (workspace && !workspace.goal) {
+  const chips = workspace && (
+    <GoalChips
+      goals={shownGoals(workspace, goal?.id ?? null)}
+      selectedId={goal?.id ?? null}
+      onSelect={(id) => { setSelectedGoalId(id); setAdding(false); }}
+      adding={adding}
+      onAdd={() => setAdding((on) => !on)}
+    />
+  );
+
+  if (workspace && workspace.goals.length === 0) {
     return (
       <AppLayout>
         <div className="flex-1 flex items-center justify-center p-8 min-h-full">
@@ -271,25 +294,42 @@ export default function QuizPage() {
     );
   }
 
-  // The coach finished (or stopped): its closing summary, whole, and the
-  // box for the next goal. Nothing else competes with it on the page.
-  if (workspace && canSetGoal(workspace)) {
+  // A new goal from the + chip: the intent box in place, the chips above.
+  if (workspace && adding) {
     return (
       <AppLayout>
-        <div className="flex-1 flex flex-col items-center justify-center gap-8 p-8 min-h-full">
-          {workspace.summary ? (
-            <Card className="p-8 w-full max-w-xl" data-testid="finish-summary">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground mb-3">
-                Goal: {workspace.goal?.intent}
-              </p>
-              <div className="font-display text-lg leading-relaxed text-foreground">
-                <Prompt>{workspace.summary}</Prompt>
-              </div>
-            </Card>
-          ) : (
-            operatorStatus && <p className="text-muted-foreground">{operatorStatus}</p>
-          )}
-          <IntentBox onSubmit={startGoal} title="What next?" />
+        <div className="flex flex-col min-h-full">
+          {chips}
+          <div className="flex-1 flex items-center justify-center p-8">
+            <IntentBox onSubmit={startGoal} title="What else do you want to learn?" />
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // The goal on screen is finished (or stopped): its closing summary,
+  // whole; when no goal is still going, the box for the next one under it.
+  if (workspace && goal && !isOpen(goal)) {
+    return (
+      <AppLayout>
+        <div className="flex flex-col min-h-full">
+          {chips}
+          <div className="flex-1 flex flex-col items-center justify-center gap-8 p-8">
+            {goal.summary ? (
+              <Card className="p-8 w-full max-w-xl" data-testid="finish-summary">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground mb-3">
+                  Goal: {goal.intent}
+                </p>
+                <div className="font-display text-lg leading-relaxed text-foreground">
+                  <Prompt>{goal.summary}</Prompt>
+                </div>
+              </Card>
+            ) : (
+              operatorStatus && <p className="text-muted-foreground">{operatorStatus}</p>
+            )}
+            {!workspace.goals.some(isOpen) && <IntentBox onSubmit={startGoal} title="What next?" />}
+          </div>
         </div>
       </AppLayout>
     );
@@ -310,11 +350,12 @@ export default function QuizPage() {
             </div>
             {filters}
           </header>
+          {chips}
           <div className="flex-1 flex items-center justify-center p-8">
             <div className="text-center">
               {operatorStatus ? (
                 <p className="text-muted-foreground mb-4 flex items-center gap-2 justify-center">
-                  {workspace?.operator === "thinking" && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {goal?.operator === "thinking" && <Loader2 className="h-4 w-4 animate-spin" />}
                   {operatorStatus}
                 </p>
               ) : (
@@ -396,7 +437,7 @@ export default function QuizPage() {
                 <h1 className="font-display font-semibold text-foreground">{getFilterLabel()}</h1>
                 {operatorStatus && (
                   <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                    {workspace?.operator === "thinking" && <Loader2 className="h-3 w-3 animate-spin" />}
+                    {goal?.operator === "thinking" && <Loader2 className="h-3 w-3 animate-spin" />}
                     {operatorStatus}
                   </p>
                 )}
@@ -414,6 +455,8 @@ export default function QuizPage() {
             </div>
           </div>
         </header>
+
+        {chips}
 
         <div className="px-6 py-2 border-b border-border/50">
           <Progress value={progress} className="h-1.5" />
