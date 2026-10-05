@@ -1,5 +1,6 @@
-//! The learner's workspace and goal (20a). One text box: the intent goes in,
-//! the operator starts, and the page reads where the operator is.
+//! The learner's workspace and goals (20a, 22a). One text box: the intent
+//! goes in, the operator starts, and the page reads where the operator is.
+//! Goals sit side by side, each its own run: a new one may be set whenever.
 
 use axum::{
     extract::{Path, State},
@@ -15,7 +16,7 @@ use infra::repositories::workspace::{Goal, PgWorkspaceRepository};
 
 use crate::error::HttpError;
 use crate::routes::extractor::AuthUser;
-use crate::runtime::OperatorState;
+use crate::runtime::{GoalState, OperatorState};
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -38,7 +39,10 @@ pub struct ReadingRequest {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceResponse {
     pub id: Uuid,
+    /// The newest goal, and below the operator as a whole; each goal's own
+    /// run is in `goals` (22a).
     pub goal: Option<Goal>,
+    pub goals: Vec<GoalState>,
     #[serde(flatten)]
     pub state: OperatorState,
 }
@@ -67,9 +71,18 @@ async fn describe(state: &AppState, workspace: Uuid) -> Result<WorkspaceResponse
             .await
             .map_err(operator_error)?,
     };
+    let goals = match goal {
+        None => Vec::new(),
+        Some(_) => state
+            .runtime
+            .goals(workspace)
+            .await
+            .map_err(operator_error)?,
+    };
     Ok(WorkspaceResponse {
         id: workspace,
         goal,
+        goals,
         state: operator,
     })
 }
@@ -134,11 +147,10 @@ async fn reading(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// The intent in: stored as the next goal revision, and the run that
-/// serves it starts now, in the background. Answers 202 with the workspace
-/// thinking. A workspace whose operator is still on a goal (thinking,
-/// waiting, stalled, unavailable) answers 409: finish or leave first. One
-/// run per goal; the next goal is the next run on the same instance.
+/// The intent in: stored as the workspace's next goal, beside the others
+/// (22a), and the run that serves it starts now, in the background, or as
+/// soon as the goal the operator is thinking about lets it. Answers 202.
+/// One run per goal, all on the same record.
 async fn set_goal(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -146,20 +158,12 @@ async fn set_goal(
     Json(req): Json<GoalRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
     let workspace = repo(&state).owned(user_id, id).await?;
-    if repo(&state).goal(workspace).await?.is_some() {
-        let current = state
-            .runtime
-            .state(workspace)
-            .await
-            .map_err(operator_error)?;
-        if !matches!(current, OperatorState::Idle { .. }) {
-            return Err(HttpError(app::errors::AppError::Conflict(
-                "the operator is still on the current goal".into(),
-            )));
-        }
-    }
     let goal = repo(&state).set_goal(workspace, &req.intent).await?;
-    state.runtime.start(workspace, goal.id, goal.intent.clone());
+    state
+        .runtime
+        .add_goal(workspace, &goal)
+        .await
+        .map_err(operator_error)?;
     Ok((
         StatusCode::ACCEPTED,
         Json(describe(&state, workspace).await?),
@@ -460,17 +464,6 @@ mod tests {
             intent,
             "the goal is the model's task (no sources yet)"
         );
-
-        // No second goal while the operator is on this one.
-        let (status, _) = call(
-            &app,
-            "POST",
-            &format!("/api/workspaces/{ws}/goal"),
-            user,
-            Some(json!({ "intent": "another" })),
-        )
-        .await;
-        assert_eq!(status, StatusCode::CONFLICT);
 
         // A new process: a fresh runtime reopens the record and reads the
         // same wait, asking no model.
@@ -870,6 +863,166 @@ mod tests {
         assert_eq!(
             models.lock().unwrap()[2].payload()[0][3],
             "Now the Bellman equation."
+        );
+        runtime.close(ws.parse().unwrap()).await.unwrap();
+    }
+
+    /// The workspace once no goal is thinking (22a): a goal set while
+    /// another thinks starts on a later read.
+    async fn all_settled(app: &Router, user: Uuid, ws: &str) -> Value {
+        for _ in 0..100 {
+            let body = settled(app, user, ws).await;
+            let goals = body["goals"].as_array().unwrap();
+            if goals.iter().all(|goal| goal["operator"] != "thinking") {
+                return body;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("a goal thought for over ten seconds");
+    }
+
+    /// Two goals side by side (22a): each is its own run on the one record,
+    /// each waits on its own activity, and answering one wakes only that
+    /// one. A process restart reads both back, asking no model.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn two_goals_run_side_by_side_and_an_answer_wakes_only_its_own(pool: PgPool) {
+        const BELLMAN: &str = r#"(coach/present "State the Bellman equation for v_pi." "v(s) = sum over actions and next states of the expected reward plus the discounted next value")"#;
+        const BELLMAN_NEXT: &str = r#"(coach/present "Why is it a fixed point?" "v_pi is the unique solution of the equation")"#;
+        let models = Calls::default();
+        let (app, runtime) = serve(
+            &pool,
+            scripted(models.clone(), vec![FIRST, BELLMAN, ASSESS, BELLMAN_NEXT]),
+        )
+        .await;
+        let user = learner(&pool, "two@x.test").await;
+        let (_, current) = call(&app, "GET", "/api/workspaces/current", user, None).await;
+        let ws = current["id"].as_str().unwrap().to_string();
+        assert_eq!(current["goals"], json!([]));
+
+        // Two intents, the second sent while the first may still think: it
+        // is accepted either way, and runs once the first lets it.
+        for intent in ["Understand the return.", "Understand the Bellman equation."] {
+            let (status, body) = call(
+                &app,
+                "POST",
+                &format!("/api/workspaces/{ws}/goal"),
+                user,
+                Some(json!({ "intent": intent })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        }
+        let both = all_settled(&app, user, &ws).await;
+        let goals = both["goals"].as_array().unwrap();
+        assert_eq!(goals.len(), 2, "{both}");
+        assert_eq!(goals[0]["intent"], "Understand the return.");
+        assert_eq!(goals[1]["intent"], "Understand the Bellman equation.");
+        assert_eq!(goals[0]["operator"], "waiting", "{both}");
+        assert_eq!(goals[1]["operator"], "waiting", "{both}");
+        let (return_activity, bellman_activity) = (
+            goals[0]["currentActivityId"].as_str().unwrap().to_string(),
+            goals[1]["currentActivityId"].as_str().unwrap().to_string(),
+        );
+        assert_ne!(return_activity, bellman_activity);
+        assert_eq!(
+            models.lock().unwrap()[1].payload()[0][3],
+            "Understand the Bellman equation.",
+            "the second run's task is the second goal"
+        );
+        let (runs, forms): (i64, i64) = sqlx::query_as(
+            "SELECT count(*), count(DISTINCT run_form) FROM goal_runs WHERE workspace_id = $1::uuid",
+        )
+        .bind(&ws)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((runs, forms), (2, 2), "one run per goal");
+
+        // The learner answers the Bellman activity: that run wakes, is
+        // assessed and presents its next; the return's wait is untouched.
+        let revision = revision_of(&pool, &bellman_activity).await;
+        let (status, receipt) = call(
+            &app,
+            "POST",
+            "/api/attempts",
+            user,
+            Some(json!({ "requestKey": "b1", "activityRevisionId": revision, "response": "a fixed-point equation for v" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{receipt}");
+        let after = all_settled(&app, user, &ws).await;
+        let goals = after["goals"].as_array().unwrap();
+        assert_eq!(
+            goals[0]["currentActivityId"],
+            return_activity.as_str(),
+            "{after}"
+        );
+        assert_eq!(goals[1]["operator"], "waiting", "{after}");
+        let bellman_next = goals[1]["currentActivityId"].as_str().unwrap().to_string();
+        assert_ne!(bellman_next, bellman_activity);
+        {
+            let models = models.lock().unwrap();
+            assert_eq!(models.len(), 4, "present, present, assess, present");
+            assert_eq!(
+                models[2].payload()[0][3],
+                "Understand the Bellman equation.",
+                "the attempt woke the Bellman run, not the return's"
+            );
+            assert_eq!(
+                models[2].payload()[0][4][0][1][0][1]["attemptId"],
+                receipt["attemptId"]
+            );
+        }
+
+        // A new process reads both goals back from the record, asking no
+        // model.
+        runtime.close(ws.parse().unwrap()).await.unwrap();
+        let (app, runtime) = serve(&pool, scripted(Calls::default(), vec![])).await;
+        let reopened = all_settled(&app, user, &ws).await;
+        let goals = reopened["goals"].as_array().unwrap();
+        assert_eq!(goals[0]["currentActivityId"], return_activity.as_str());
+        assert_eq!(goals[1]["currentActivityId"], bellman_next.as_str());
+        assert_eq!(models.lock().unwrap().len(), 4, "reopen asked no provider");
+        runtime.close(ws.parse().unwrap()).await.unwrap();
+    }
+
+    /// A goal set before 22a has no `goal_runs` row: it is adopted from the
+    /// record, tied to the run pending under an origin no goal claims.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn a_goal_set_before_goals_ran_side_by_side_is_adopted(pool: PgPool) {
+        let (app, runtime) = serve(&pool, scripted(Calls::default(), vec![FIRST])).await;
+        let user = learner(&pool, "old@x.test").await;
+        let (_, current) = call(&app, "GET", "/api/workspaces/current", user, None).await;
+        let ws = current["id"].as_str().unwrap().to_string();
+        call(
+            &app,
+            "POST",
+            &format!("/api/workspaces/{ws}/goal"),
+            user,
+            Some(json!({ "intent": "Understand the return." })),
+        )
+        .await;
+        let waiting = all_settled(&app, user, &ws).await;
+        let activity = waiting["goals"][0]["currentActivityId"].clone();
+        let (form,): (String,) = sqlx::query_as("DELETE FROM goal_runs RETURNING run_form")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        runtime.close(ws.parse().unwrap()).await.unwrap();
+
+        let (app, runtime) = serve(&pool, scripted(Calls::default(), vec![])).await;
+        let adopted = all_settled(&app, user, &ws).await;
+        assert_eq!(adopted["goals"][0]["operator"], "waiting", "{adopted}");
+        assert_eq!(adopted["goals"][0]["currentActivityId"], activity);
+        let (again, task): (String, Option<String>) =
+            sqlx::query_as("SELECT run_form, task FROM goal_runs")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            (again, task),
+            (form, None),
+            "tied to its run, with no task to run again"
         );
         runtime.close(ws.parse().unwrap()).await.unwrap();
     }

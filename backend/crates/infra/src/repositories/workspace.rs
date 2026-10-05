@@ -1,6 +1,7 @@
 //! Workspaces and goals (20a). A learner has one workspace in Phase 2,
-//! made on first sight; a workspace holds one goal, at revision 1. Every
-//! read and write is by the owning learner.
+//! made on first sight; a workspace holds goals side by side (22a), each
+//! set once and numbered in order (`revision`). Every read and write is by
+//! the owning learner.
 
 use chrono::{DateTime, Utc};
 use domain::errors::DomainError;
@@ -121,9 +122,20 @@ impl PgWorkspaceRepository {
         .map_err(db)
     }
 
-    /// Store `intent` as the workspace's next goal revision. Whether a new
-    /// goal may be set now (only when the operator is idle) is the route's
-    /// check; the unique (workspace, revision) key settles a race.
+    /// The workspace's goals, in the order they were set.
+    pub async fn goals(&self, workspace: Uuid) -> Result<Vec<Goal>, DomainError> {
+        sqlx::query_as(
+            "SELECT id, workspace_id, revision, intent, created_at FROM goals
+             WHERE workspace_id = $1 ORDER BY revision",
+        )
+        .bind(workspace)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db)
+    }
+
+    /// Store `intent` as the workspace's next goal, beside the ones it has
+    /// (22a); the unique (workspace, revision) key settles a race.
     pub async fn set_goal(&self, workspace: Uuid, intent: &str) -> Result<Goal, DomainError> {
         let intent = intent.trim();
         if intent.is_empty() {

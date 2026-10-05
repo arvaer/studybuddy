@@ -33,12 +33,20 @@
 //! leaves it `stalled` until the next restart, so a broken model is not
 //! called on every page poll.
 //!
+//! **Goals side by side (22a).** Each goal is its own run of the coach on
+//! the workspace's one record, started with the goal's id as its dedup key.
+//! The record says which run a park belongs to (its origin), and
+//! `goal_runs` ties each goal to its run's form, so a goal's state is read
+//! from the parks under its origin: answering one goal's activity wakes
+//! that run and leaves the others' waits alone. One think at a time: the
+//! record has one writer.
+//!
 //! Providers: the model as this process has it (`operator::Model`, or a
 //! test's scripted one) and `learning/present` and `learning/assess` (20f)
 //! as clients of this process's own effect endpoints over loopback
 //! (`operator::providers`).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -46,7 +54,7 @@ use app::services::attempt::AttemptService;
 use capsule_corp::sdk::{Answer, Completed, Interrupt, Outcome, Park, Reply, Session};
 use capsule_host::owner::Handle;
 use infra::repositories::attempt::PgAttemptRepository;
-use infra::repositories::workspace::PgWorkspaceRepository;
+use infra::repositories::workspace::{Goal, PgWorkspaceRepository};
 use operator::capsule;
 use operator::host::{Install, Record};
 use operator::receipts::{self, Receipt, Recorded};
@@ -99,6 +107,16 @@ pub enum OperatorState {
     Unavailable { why: String },
 }
 
+/// A goal and where its run is (22a).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalState {
+    #[serde(flatten)]
+    pub goal: Goal,
+    #[serde(flatten)]
+    pub state: OperatorState,
+}
+
 pub struct OperatorRuntime {
     host: OperatorHost,
     pool: PgPool,
@@ -106,6 +124,11 @@ pub struct OperatorRuntime {
     secret: Arc<str>,
     installer: Installer,
     thinking: Mutex<HashSet<Uuid>>,
+    /// The goal each workspace's think is serving, once known (22a).
+    serving: Mutex<HashMap<Uuid, Uuid>>,
+    /// Each goal's state as last read, shown while its workspace thinks
+    /// for another goal: the owner thread is busy then and is not asked.
+    seen: Mutex<HashMap<Uuid, OperatorState>>,
     /// Effect ids allowed again in this process after an interruption.
     allowed: Mutex<HashSet<String>>,
     /// Where every measured wake goes; one writer task drains it (21d).
@@ -131,6 +154,8 @@ impl OperatorRuntime {
             secret,
             installer,
             thinking: Mutex::new(HashSet::new()),
+            serving: Mutex::new(HashMap::new()),
+            seen: Mutex::new(HashMap::new()),
             allowed: Mutex::new(HashSet::new()),
             wakes,
         }
@@ -198,6 +223,7 @@ impl OperatorRuntime {
                 .lock()
                 .expect("thinking")
                 .remove(&workspace);
+            runtime.serving.lock().expect("serving").remove(&workspace);
             match outcome {
                 Ok(outcome) => {
                     tracing::info!(workspace = %workspace, what, outcome = %outcome, "operator settled")
@@ -210,14 +236,60 @@ impl OperatorRuntime {
         true
     }
 
-    /// Start the run that serves `goal_revision` with `intent`, in the
-    /// background, once: the revision id is the run's dedup key. The run's
-    /// one argument is the task text: the goal and, under it, the learner's
-    /// sources (21a), what the coach may read, each by id, title and page
-    /// count. Text, because the adapter's task is text.
-    pub fn start(self: &Arc<Self>, workspace: Uuid, goal_revision: Uuid, intent: String) {
+    /// Set `goal` going beside the workspace's other goals (22a): its task
+    /// is kept with it, then its run starts. The task is the run's one
+    /// argument: the goal and, under it, the learner's sources (21a), what
+    /// the coach may read, each by id, title and page count. Text, because
+    /// the adapter's task is text.
+    pub async fn add_goal(
+        self: &Arc<Self>,
+        workspace: Uuid,
+        goal: &Goal,
+    ) -> Result<(), OperatorError> {
+        if !self.thinking.lock().expect("thinking").contains(&workspace) {
+            let handle = self.open(workspace).await?;
+            let goals = PgWorkspaceRepository::new(self.pool.clone())
+                .goals(workspace)
+                .await
+                .map_err(repository)?;
+            let earlier: Vec<Goal> = goals.into_iter().filter(|g| g.id != goal.id).collect();
+            self.adopt(workspace, &handle, &earlier).await?;
+        }
+        let task = self.task(workspace, &goal.intent).await?;
+        sqlx::query(
+            "INSERT INTO goal_runs (goal_id, workspace_id, task) VALUES ($1, $2, $3)
+             ON CONFLICT (goal_id) DO NOTHING",
+        )
+        .bind(goal.id)
+        .bind(workspace)
+        .bind(task)
+        .execute(&self.pool)
+        .await?;
+        self.start(workspace, goal.id);
+        Ok(())
+    }
+
+    /// Start the run that serves `goal` with its kept task, in the
+    /// background, once: the goal's id is the run's dedup key, so after a
+    /// crash mid-think the same call answers the run it made, writing
+    /// nothing, and the goal learns its run's form. A goal whose run is
+    /// known is left alone. Answers whether a think was started.
+    fn start(self: &Arc<Self>, workspace: Uuid, goal: Uuid) -> bool {
         self.think(workspace, "start", move |runtime| async move {
-            let task = runtime.task(workspace, &intent).await?;
+            runtime
+                .serving
+                .lock()
+                .expect("serving")
+                .insert(workspace, goal);
+            let task: Option<Option<String>> = sqlx::query_scalar(
+                "SELECT task FROM goal_runs WHERE goal_id = $1 AND run_form IS NULL",
+            )
+            .bind(goal)
+            .fetch_optional(&runtime.pool)
+            .await?;
+            let Some(Some(task)) = task else {
+                return Ok("the goal's run is already known".into());
+            };
             let handle = runtime.open(workspace).await?;
             let run = tokio::task::spawn_blocking(move || -> Result<_, OperatorError> {
                 // The instance of the capsule as it is in this build: the
@@ -237,12 +309,108 @@ impl OperatorRuntime {
                         handle.instantiate(compiled)??
                     }
                 };
-                Ok(handle.run_once(&goal_revision.to_string(), instance, vec![json!(task)])??)
+                Ok(handle.run_once(&goal.to_string(), instance, vec![json!(task)])??)
             })
             .await
             .map_err(|_| OperatorError::Join)??;
+            sqlx::query("UPDATE goal_runs SET run_form = $2 WHERE goal_id = $1")
+                .bind(goal)
+                .bind(run.form())
+                .execute(&runtime.pool)
+                .await?;
+            runtime.ended(goal, run.outcome()).await?;
             Ok(describe(run.outcome()))
-        });
+        })
+    }
+
+    /// Keep on the goal how its run ended, when it has.
+    async fn ended(&self, goal: Uuid, outcome: &Outcome) -> Result<(), OperatorError> {
+        if matches!(outcome, Outcome::Parked(_) | Outcome::Paused(_)) {
+            return Ok(());
+        }
+        sqlx::query("UPDATE goal_runs SET ended = $2, summary = $3 WHERE goal_id = $1")
+            .bind(goal)
+            .bind(describe(outcome))
+            .bind(summary_of(outcome))
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// The goal whose run began with the form `origin`, if one does.
+    async fn goal_of(&self, workspace: Uuid, origin: &str) -> Result<Option<Uuid>, OperatorError> {
+        Ok(sqlx::query_scalar(
+            "SELECT goal_id FROM goal_runs WHERE workspace_id = $1 AND run_form = $2",
+        )
+        .bind(workspace)
+        .bind(origin)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
+    /// Goals set before 22a have no `goal_runs` row, and at most the newest
+    /// of them can still be running (one goal at a time then). Tie it to
+    /// the run pending under an origin no goal claims, if there is one,
+    /// else to how the record's last run ended; the older ones ended before
+    /// goals ran side by side.
+    async fn adopt(
+        &self,
+        workspace: Uuid,
+        handle: &Handle<Record>,
+        goals: &[Goal],
+    ) -> Result<(), OperatorError> {
+        let claimed: Vec<(Uuid, Option<String>)> =
+            sqlx::query_as("SELECT goal_id, run_form FROM goal_runs WHERE workspace_id = $1")
+                .bind(workspace)
+                .fetch_all(&self.pool)
+                .await?;
+        let unclaimed: Vec<&Goal> = goals
+            .iter()
+            .filter(|goal| !claimed.iter().any(|(id, _)| *id == goal.id))
+            .collect();
+        let Some((newest, older)) = unclaimed.split_last() else {
+            return Ok(());
+        };
+        let forms: HashSet<&str> = claimed.iter().filter_map(|(_, f)| f.as_deref()).collect();
+        let pending = handle.pending()?;
+        let orphan = pending
+            .iter()
+            .map(|park| park.origin().to_string())
+            .find(|origin| !forms.contains(origin.as_str()));
+        let (form, ended, summary) = match orphan {
+            Some(origin) => (Some(origin), None, None),
+            None => {
+                let runs = handle.runs()?;
+                let last = runs.last();
+                (
+                    None,
+                    last.map(|run| describe(run.outcome())),
+                    last.and_then(|run| summary_of(run.outcome())),
+                )
+            }
+        };
+        let insert = "INSERT INTO goal_runs (goal_id, workspace_id, run_form, ended, summary)
+                      VALUES ($1, $2, $3, $4, $5) ON CONFLICT (goal_id) DO NOTHING";
+        sqlx::query(insert)
+            .bind(newest.id)
+            .bind(workspace)
+            .bind(form)
+            .bind(ended)
+            .bind(summary)
+            .execute(&self.pool)
+            .await?;
+        for goal in older {
+            sqlx::query(insert)
+                .bind(goal.id)
+                .bind(workspace)
+                .bind(None::<String>)
+                .bind("set before goals ran side by side")
+                .bind(None::<String>)
+                .execute(&self.pool)
+                .await?;
+        }
+        tracing::info!(workspace = %workspace, goals = unclaimed.len(), "goals set before 22a adopted from the record");
+        Ok(())
     }
 
     /// The task text: the intent, then the learner's sources as the coach
@@ -444,6 +612,7 @@ impl OperatorRuntime {
                 }
                 for park in interrupted {
                     let (family, digest) = (park.family().to_string(), park.digest().to_string());
+                    let goal = runtime.serve(workspace, park.origin()).await?;
                     runtime
                         .allowed
                         .lock()
@@ -456,6 +625,9 @@ impl OperatorRuntime {
                     })
                     .await
                     .map_err(|_| OperatorError::Join)???;
+                    if let Some(goal) = goal {
+                        runtime.ended(goal, run.outcome()).await?;
+                    }
                     settled.push(format!("resumed {family}: {}", describe(run.outcome())));
                 }
                 for park in owed {
@@ -464,12 +636,19 @@ impl OperatorRuntime {
                     else {
                         continue;
                     };
+                    let goal = runtime.serve(workspace, park.origin()).await?;
                     let handle = runtime.open(workspace).await?;
                     let completed = tokio::task::spawn_blocking(move || {
                         handle.complete(park.digest(), Reply::Value(receipt.payload))
                     })
                     .await
                     .map_err(|_| OperatorError::Join)???;
+                    let run = match &completed {
+                        Completed::Recorded(run) | Completed::Already(run) => run,
+                    };
+                    if let Some(goal) = goal {
+                        runtime.ended(goal, run.outcome()).await?;
+                    }
                     let how = match &completed {
                         Completed::Recorded(run) => describe(run.outcome()),
                         Completed::Already(run) => format!("already: {}", describe(run.outcome())),
@@ -499,14 +678,15 @@ impl OperatorRuntime {
         }
         let handle = self.open(workspace).await?;
         let pending = handle.pending()?;
-        if let Some(wait) = pending.iter().find(|park| park.family() == WAIT_FAMILY) {
-            let activity = wait
-                .effect()
-                .payload()
-                .get(1)
-                .and_then(|p| p["id"].as_str());
+        // The wait parked last: with goals side by side, the newest goal's
+        // (22a); each goal's own is in `goals`.
+        if let Some(wait) = pending
+            .iter()
+            .rev()
+            .find(|park| park.family() == WAIT_FAMILY)
+        {
             return Ok(OperatorState::Waiting {
-                current_activity_id: activity.map(str::to_string),
+                current_activity_id: activity_of(wait),
             });
         }
         if !pending.is_empty() {
@@ -522,6 +702,145 @@ impl OperatorRuntime {
         let summary = runs.last().and_then(|run| summary_of(run.outcome()));
         Ok(OperatorState::Idle { last, summary })
     }
+
+    /// Mark the workspace's think as serving the goal whose run began with
+    /// `origin`, and answer that goal.
+    async fn serve(&self, workspace: Uuid, origin: &str) -> Result<Option<Uuid>, OperatorError> {
+        let goal = self.goal_of(workspace, origin).await?;
+        if let Some(goal) = goal {
+            self.serving
+                .lock()
+                .expect("serving")
+                .insert(workspace, goal);
+        }
+        Ok(goal)
+    }
+
+    /// Each of the workspace's goals and where its run is (22a), read from
+    /// the parks under its run's origin. Call after `state`, which settles
+    /// what is owed. A goal whose task is kept but whose run is not yet
+    /// known is started now (it was set while another goal thought, or the
+    /// process died mid-think). While the workspace thinks, the goal it
+    /// serves is `thinking` and the others read as they were last seen.
+    pub async fn goals(self: &Arc<Self>, workspace: Uuid) -> Result<Vec<GoalState>, OperatorError> {
+        let goals = PgWorkspaceRepository::new(self.pool.clone())
+            .goals(workspace)
+            .await
+            .map_err(repository)?;
+        if goals.is_empty() {
+            return Ok(Vec::new());
+        }
+        if self.thinking.lock().expect("thinking").contains(&workspace) {
+            let serving = self
+                .serving
+                .lock()
+                .expect("serving")
+                .get(&workspace)
+                .copied();
+            let seen = self.seen.lock().expect("seen");
+            return Ok(goals
+                .into_iter()
+                .map(|goal| {
+                    let state = match seen.get(&goal.id) {
+                        Some(state) if serving != Some(goal.id) => state.clone(),
+                        _ => OperatorState::Thinking,
+                    };
+                    GoalState { goal, state }
+                })
+                .collect());
+        }
+        let handle = match self.open(workspace).await {
+            Ok(handle) => handle,
+            // Another process's lease (20e): every goal waits it out.
+            Err(OperatorError::Leased(_)) => {
+                return Ok(goals
+                    .into_iter()
+                    .map(|goal| {
+                        GoalState {
+                    goal,
+                    state: OperatorState::Unavailable {
+                        why: "another process held this workspace's session a moment ago; retrying"
+                            .into(),
+                    },
+                }
+                    })
+                    .collect())
+            }
+            Err(error) => return Err(error),
+        };
+        self.adopt(workspace, &handle, &goals).await?;
+        let rows: Vec<GoalRun> = sqlx::query_as(
+            "SELECT goal_id, task IS NOT NULL AS has_task, run_form, ended, summary
+                 FROM goal_runs WHERE workspace_id = $1",
+        )
+        .bind(workspace)
+        .fetch_all(&self.pool)
+        .await?;
+        let pending = handle.pending()?;
+        let mut states = Vec::with_capacity(goals.len());
+        for goal in goals {
+            let row = rows.iter().find(|row| row.goal_id == goal.id);
+            let state = match row {
+                None => OperatorState::Idle {
+                    last: None,
+                    summary: None,
+                },
+                Some(GoalRun {
+                    has_task: true,
+                    run_form: None,
+                    ..
+                }) => {
+                    self.start(workspace, goal.id);
+                    OperatorState::Thinking
+                }
+                Some(row) => {
+                    let parks: Vec<&Park> = pending
+                        .iter()
+                        .filter(|park| row.run_form.as_deref() == Some(park.origin()))
+                        .collect();
+                    if let Some(wait) = parks.iter().find(|park| park.family() == WAIT_FAMILY) {
+                        OperatorState::Waiting {
+                            current_activity_id: activity_of(wait),
+                        }
+                    } else if !parks.is_empty() {
+                        OperatorState::Stalled {
+                            families: parks.iter().map(|park| park.family().to_string()).collect(),
+                        }
+                    } else {
+                        OperatorState::Idle {
+                            last: row.ended.clone(),
+                            summary: row.summary.clone(),
+                        }
+                    }
+                }
+            };
+            self.seen
+                .lock()
+                .expect("seen")
+                .insert(goal.id, state.clone());
+            states.push(GoalState { goal, state });
+        }
+        Ok(states)
+    }
+}
+
+/// A goal's `goal_runs` row, as `goals` reads it.
+#[derive(sqlx::FromRow)]
+struct GoalRun {
+    goal_id: Uuid,
+    has_task: bool,
+    run_form: Option<String>,
+    ended: Option<String>,
+    summary: Option<String>,
+}
+
+/// The activity a `learner/wait` park holds the learner to.
+fn activity_of(wait: &Park) -> Option<String> {
+    wait.effect()
+        .payload()
+        .get(1)
+        .and_then(|p| p["id"].as_str())
+        .map(str::to_string)
 }
 
 /// The revision a `learner/wait` park holds: the publication's current one.
