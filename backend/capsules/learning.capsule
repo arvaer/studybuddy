@@ -76,24 +76,14 @@
 
   (define coach/finish (lambda (summary) (list "done" summary)))
 
-  ;; The loop: ask the model, run what it picked, go again with the turn on
-  ;; the record, until it finishes or the model declines.
-  (define coach/loop
-    (lambda (goal turns)
-      (coach/turn goal turns
-        (call/model (list "agent.v2" coach/system (list) goal turns (offer coach/verbs))))))
-  (define coach/turn
-    (lambda (goal turns reply)
-      (coach/next goal turns reply (act reply coach/verbs))))
-  (define coach/next
-    (lambda (goal turns reply results)
-      (if (eq? (car (car results)) "done")
-          (car results)
-          (if (eq? (car (car results)) "declined")
-              (car results)
-              (coach/loop goal (cons (list reply results) turns))))))
-
-  ;; The host starts a run with the task text: the goal in the learner's
-  ;; words and, under it, the sources they uploaded (21a).
-  (define coach/entry (lambda (goal) (coach/loop goal (list))))
+  ;; The loop capsule-corp ships (sdk "The language", H2): ask the model,
+  ;; run what it picked, go again with the turn on the record, until it
+  ;; finishes or the model declines; it answers that result whole. The
+  ;; host starts a run with the task text: the goal in the learner's words
+  ;; and, under it, the sources they uploaded (21a).
+  (define coach/entry
+    (lambda (goal)
+      (loop (lambda (goal turns offered)
+              (call/model (list "agent.v2" coach/system (list) goal turns offered)))
+            false coach/verbs goal)))
   (entry coach/entry))
