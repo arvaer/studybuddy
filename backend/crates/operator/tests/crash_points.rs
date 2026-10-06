@@ -178,8 +178,17 @@ async fn during_possible_delivery_the_receipt_settles_it_or_the_host_allows_the_
         host.reconcile(ws2).await.unwrap().settled.is_empty(),
         "no receipt, nothing to settle"
     );
+    // It may already have happened, so a bare allow is refused (capsule-corp
+    // F-011); a retry performs it again.
+    assert!(
+        handle
+            .resolve(park.clone(), Answer::Interrupt(Interrupt::Allow))
+            .unwrap()
+            .is_err(),
+        "an uncertain park refuses a bare allow"
+    );
     handle
-        .resolve(park.clone(), Answer::Interrupt(Interrupt::Allow))
+        .resolve(park.clone(), Answer::Interrupt(Interrupt::Retry))
         .unwrap()
         .unwrap();
     {

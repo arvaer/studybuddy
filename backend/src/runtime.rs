@@ -619,9 +619,18 @@ impl OperatorRuntime {
                         .expect("allowed")
                         .insert(digest.clone());
                     tracing::info!(workspace = %workspace, effect = %digest, family = %family, uncertain = park.uncertain().unwrap_or("killed"), "interrupted think allowed again");
+                    // A think cut off after it went to the model may already
+                    // have happened, and such a park refuses a bare allow
+                    // (capsule-corp F-011): resuming it is a retry, said
+                    // knowingly, under the same effect id.
+                    let interrupt = if park.uncertain().is_some() {
+                        Interrupt::Retry
+                    } else {
+                        Interrupt::Allow
+                    };
                     let handle = runtime.open(workspace).await?;
                     let run = tokio::task::spawn_blocking(move || {
-                        handle.resolve(park, Answer::Interrupt(Interrupt::Allow))
+                        handle.resolve(park, Answer::Interrupt(interrupt))
                     })
                     .await
                     .map_err(|_| OperatorError::Join)???;
