@@ -70,5 +70,5 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 
 # Capsule Core (docs/capsule-integration.md, "Revisit after Phase 1"): one pin,
 # the probe's. capsule-host's `postgres` feature is PgStorage (H4).
-capsule-corp = { git = "https://github.com/Prominent-Systems/capsule-corp", rev = "ebff40b3d44331ae41f24d0c23b3b5cc4ac1a5df" }
-capsule-host = { git = "https://github.com/Prominent-Systems/capsule-corp", rev = "ebff40b3d44331ae41f24d0c23b3b5cc4ac1a5df", features = ["postgres"] }
+capsule-corp = { git = "https://github.com/Prominent-Systems/capsule-corp", rev = "c369040468dff7c8f141c18331d0988be84d5709" }
+capsule-host = { git = "https://github.com/Prominent-Systems/capsule-corp", rev = "c369040468dff7c8f141c18331d0988be84d5709", features = ["postgres"] }
